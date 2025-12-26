@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-log-agent-config
+  namespace: ai-log-agent
+data:
+  LOKI_BASE_URL: "http://loki-loki-distributed-query-frontend.observability:3100"
+  LOKI_TENANT_ID: ""
+  LOKI_SERVICE_LABEL_KEY: "app"
+  LOKI_SELECTOR_TEMPLATE: '{{{label_key}="{service}"}}'
+
+  LLM_MODEL: "doubao-seed-1-6-251015"
+  ARK_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3"
