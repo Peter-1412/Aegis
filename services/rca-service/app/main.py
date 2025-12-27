@@ -12,7 +12,7 @@ from .models import AgentTrace, RCAOutput, RCARequest, RCAResponse, TraceStep
 from .settings import settings
 from .agent.executor import build_executor
 from .memory.store import get_memory
-from .tools.rca import build_tools
+from .tools import build_tools
 
 
 app = FastAPI(title="RCA Service", version="0.1.0")

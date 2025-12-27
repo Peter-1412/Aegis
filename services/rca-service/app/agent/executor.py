@@ -17,12 +17,13 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
         [
             (
                 "system",
-                "你是一个SRE根因分析助手。你可以使用工具从Loki收集证据。"
-                "当前可用工具：trace_note（记录计划）与 rca_collect_evidence。"
+                "你是一个SRE根因分析助手。你可以使用工具从Loki和Prometheus收集证据。"
+                "当前可用工具：trace_note（记录计划）、rca_collect_evidence 与 prometheus_query_range。"
                 "rca_collect_evidence 返回的 evidence_lines 中，每一行都包含时间戳、service 等标签以及原始日志内容。"
                 "rca_collect_evidence 支持按服务名称与日志关键词做聚焦："
                 " - service_patterns：用于指定更可能相关的服务名称片段，例如 ['user', 'auth', 'todo', 'frontend']；"
                 " - text_patterns：用于指定与故障描述相关的日志关键词，例如 ['login', 'peter', '401', 'unauthorized']。"
+                "prometheus_query_range 用于从 Prometheus 查询时间序列指标（例如错误率、延迟、CPU 使用率等），可以用来与日志证据进行对照，帮助确认根因。"
                 "在进行根因分析时，请按照以下步骤思考："
                 "1) 先复述故障症状与时间范围。"
                 "2) 结合故障描述，合理设置 service_patterns 与 text_patterns，调用 rca_collect_evidence 拉取证据。"

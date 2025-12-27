@@ -12,7 +12,7 @@ from .models import AgentTrace, ChatOpsQueryRequest, ChatOpsQueryResponse, TimeR
 from .settings import settings
 from .agent.executor import build_executor
 from .memory.store import get_memory
-from .tools.loki import build_tools
+from .tools import build_tools
 
 
 app = FastAPI(title="ChatOps Service", version="0.1.0")

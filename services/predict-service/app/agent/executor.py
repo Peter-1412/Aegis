@@ -17,7 +17,8 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
         [
             (
                 "system",
-                "你是一个SRE预测助手。你必须只输出JSON对象，不要输出额外文本。每次调用任何工具前，先调用trace_note记录本轮要做什么与原因（不超过80字）。",
+                "你是一个SRE预测助手。你可以使用工具 predict_collect_features 和 prometheus_query_range 获取错误日志统计以及 Prometheus 指标时间序列，作为预测依据。"
+                "你必须只输出JSON对象，不要输出额外文本。每次调用任何工具前，先调用trace_note记录本轮要做什么与原因（不超过80字）。",
             ),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),

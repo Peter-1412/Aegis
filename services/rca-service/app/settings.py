@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     loki_tenant_id: str | None = None
     loki_service_label_key: str = "app"
     loki_selector_template: str = '{{{label_key}="{service}"}}'
+    prometheus_base_url: str = "http://prometheus-server.observability.svc.cluster.local:80"
 
     request_timeout_s: float = 60.0
     per_service_log_limit: int = 200

@@ -32,11 +32,7 @@ def _prioritize_services(all_services: list[str], patterns: list[str] | None, ma
     return selected[:max_services]
 
 
-def build_tools(loki: LokiClient):
-    @tool("trace_note", description="记录本轮工具调用前的计划/原因（用于前端回放）。")
-    async def trace_note(note: str) -> str:
-        return note
-
+def make_rca_collect_evidence(loki: LokiClient):
     @tool(
         "rca_collect_evidence",
         description=(
@@ -124,4 +120,5 @@ def build_tools(loki: LokiClient):
             "loki_api": {"path": "/loki/api/v1/query_range"},
         }
 
-    return [trace_note, rca_collect_evidence]
+    return rca_collect_evidence
+

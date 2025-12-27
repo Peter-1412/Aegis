@@ -45,6 +45,11 @@ spec:
                 configMapKeyRef:
                   name: ai-log-agent-config
                   key: LLM_MODEL
+            - name: PROMETHEUS_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-log-agent-config
+                  key: PROMETHEUS_BASE_URL
             - name: ARK_BASE_URL
               valueFrom:
                 configMapKeyRef:

@@ -11,3 +11,4 @@ data:
 
   LLM_MODEL: "doubao-seed-1-6-251015"
   ARK_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3"
+  PROMETHEUS_BASE_URL: "http://prometheus-server.observability.svc.cluster.local:80"

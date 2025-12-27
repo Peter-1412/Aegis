@@ -8,11 +8,7 @@ from ..loki_client import LokiClient
 from ..settings import settings
 
 
-def build_tools(loki: LokiClient):
-    @tool("trace_note", description="记录本轮工具调用前的计划/原因（用于前端回放）。")
-    async def trace_note(note: str) -> str:
-        return note
-
+def make_predict_collect_features(loki: LokiClient):
     @tool("predict_collect_features", description="从 Loki 拉取错误计数时间序列与日志样本，作为预测特征。")
     async def predict_collect_features(service_name: str, lookback_hours: int = 24) -> dict:
         now = datetime.now(timezone.utc)
@@ -71,4 +67,5 @@ def build_tools(loki: LokiClient):
             "loki_api": {"path": "/loki/api/v1/query_range"},
         }
 
-    return [trace_note, predict_collect_features]
+    return predict_collect_features
+

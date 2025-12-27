@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from langchain_core.tools import tool
 
 from ..loki_client import LokiClient
-from ..settings import settings
 
 
 def _parse_dt(iso: str) -> datetime:
@@ -15,11 +14,7 @@ def _parse_dt(iso: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def build_tools(loki: LokiClient):
-    @tool("trace_note", description="记录本轮工具调用前的计划/原因（用于前端回放）。")
-    async def trace_note(note: str) -> str:
-        return note
-
+def make_loki_query_range_lines(loki: LokiClient):
     @tool("loki_query_range_lines", description="按时间范围执行 LogQL 查询，返回日志行及元信息。")
     async def loki_query_range_lines(
         logql: str,
@@ -51,5 +46,5 @@ def build_tools(loki: LokiClient):
             "lines": lines,
         }
 
-    return [trace_note, loki_query_range_lines]
+    return loki_query_range_lines
 
