@@ -1,8 +1,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ai-log-agent-config
-  namespace: ai-log-agent
+  name: aegis-config
+  namespace: aegis
 data:
   LOKI_BASE_URL: "http://loki-loki-distributed-query-frontend.observability:3100"
   LOKI_TENANT_ID: ""

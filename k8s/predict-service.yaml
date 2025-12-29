@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: predict-service
-  namespace: ai-log-agent
+  namespace: aegis
 spec:
   replicas: 1
   selector:
@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: predict-service
-          image: ai-log-agent/predict-service:0.1.0
+          image: aegis/predict-service:0.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8003
@@ -23,42 +23,42 @@ spec:
             - name: LOKI_BASE_URL
               valueFrom:
                 configMapKeyRef:
-                  name: ai-log-agent-config
+                  name: aegis-config
                   key: LOKI_BASE_URL
             - name: LOKI_TENANT_ID
               valueFrom:
                 configMapKeyRef:
-                  name: ai-log-agent-config
+                  name: aegis-config
                   key: LOKI_TENANT_ID
             - name: LOKI_SERVICE_LABEL_KEY
               valueFrom:
                 configMapKeyRef:
-                  name: ai-log-agent-config
+                  name: aegis-config
                   key: LOKI_SERVICE_LABEL_KEY
             - name: LOKI_SELECTOR_TEMPLATE
               valueFrom:
                 configMapKeyRef:
-                  name: ai-log-agent-config
+                  name: aegis-config
                   key: LOKI_SELECTOR_TEMPLATE
             - name: LLM_MODEL
               valueFrom:
                 configMapKeyRef:
-                  name: ai-log-agent-config
+                  name: aegis-config
                   key: LLM_MODEL
             - name: PROMETHEUS_BASE_URL
               valueFrom:
                 configMapKeyRef:
-                  name: ai-log-agent-config
+                  name: aegis-config
                   key: PROMETHEUS_BASE_URL
             - name: ARK_BASE_URL
               valueFrom:
                 configMapKeyRef:
-                  name: ai-log-agent-config
+                  name: aegis-config
                   key: ARK_BASE_URL
             - name: ARK_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: ai-log-agent-secrets
+                  name: aegis-secrets
                   key: ARK_API_KEY
           readinessProbe:
             httpGet:
@@ -71,7 +71,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: predict-service
-  namespace: ai-log-agent
+  namespace: aegis
 spec:
   type: NodePort
   selector:
