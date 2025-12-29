@@ -26,7 +26,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
                 " - 可用性与资源：up、process_resident_memory_bytes、process_cpu_seconds_total；"
                 " - MySQL 与节点：mysql_up、mysqld_exporter_build_info、node_memory_MemAvailable_bytes、node_memory_MemTotal_bytes、node_cpu_seconds_total。"
                 "使用 Loki 时，只能在选择器中使用 namespace、app、pod、container、job、node_name、filename、stream 等标签，"
-                "对于日志里的 service=、level= 等字段必须通过 |= 或 |~ 做文本过滤，禁止写成 {service=\"xxx\"}。"
+                "对于日志里的 service=、level= 等字段必须通过 |= 或 |~ 做文本过滤，禁止写成 {{service=\"xxx\"}}。"
                 "rca_collect_evidence 会基于通用错误正则从多个服务批量收集错误/异常日志，你可以通过 service_patterns 与 text_patterns 聚焦更可能相关的服务与关键词。"
                 "在进行根因分析时，请按照以下步骤思考："
                 "1) 先复述故障症状与时间范围，结合 Prometheus 查询相关服务在该时间段内的错误率、延迟、QPS 和关键业务指标变化；"
