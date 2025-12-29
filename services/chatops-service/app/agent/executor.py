@@ -21,7 +21,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
                 "集群中与业务强相关的服务包括：user-service、todo-service、ai-service；此外还有节点、MySQL 等基础设施组件。"
                 "当需要查询日志时，优先使用工具 loki_query_range_lines，并基于给定的时间范围构造 LogQL："
                 " - 仅在选择器中使用 Kubernetes 原生标签，例如 namespace、app、pod、container、job、node_name、filename、stream；"
-                " - 日志中的 service=、level= 等字段只是普通文本，必须通过 |= 或 |~ 做文本过滤，禁止写成 {service=\"xxx\"}。"
+                " - 日志中的 service=、level= 等字段只是普通文本，必须通过 |= 或 |~ 做文本过滤，禁止写成 {{service=\"xxx\"}}。"
                 "当需要查询数值类指标（如 QPS、错误率、延迟、CPU/内存使用率、业务成功率等）时，使用工具 prometheus_query_range 调用 Prometheus 的 /api/v1/query_range 接口。"
                 "在构造 PromQL 时，请优先参考以下常见指标家族（示例，并非完整列表）："
                 " - HTTP 通用：http_requests_total、http_request_duration_seconds_bucket；"
