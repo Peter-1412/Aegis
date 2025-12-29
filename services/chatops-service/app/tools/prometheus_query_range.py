@@ -25,18 +25,37 @@ async def prometheus_query_range(
     end_iso: str,
     step: str = "60s",
 ) -> dict:
-    start = _parse_dt(start_iso)
-    end = _parse_dt(end_iso)
+    try:
+        start = _parse_dt(start_iso)
+        end = _parse_dt(end_iso)
+    except Exception as exc:
+        return {
+            "error": "invalid_datetime",
+            "message": str(exc),
+            "promql": promql,
+            "start_raw": start_iso,
+            "end_raw": end_iso,
+        }
     params = {
         "query": promql,
         "start": start.isoformat(),
         "end": end.isoformat(),
         "step": step,
     }
-    async with httpx.AsyncClient(timeout=settings.request_timeout_s) as client:
-        r = await client.get(f"{settings.prometheus_base_url.rstrip('/')}/api/v1/query_range", params=params)
-    r.raise_for_status()
-    data = r.json()
+    try:
+        async with httpx.AsyncClient(timeout=settings.request_timeout_s) as client:
+            r = await client.get(f"{settings.prometheus_base_url.rstrip('/')}/api/v1/query_range", params=params)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as exc:
+        return {
+            "error": "prometheus_request_failed",
+            "message": str(exc),
+            "promql": promql,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "step": step,
+        }
     series = []
     for item in data.get("data", {}).get("result", []) or []:
         metric = item.get("metric", {}) or {}
