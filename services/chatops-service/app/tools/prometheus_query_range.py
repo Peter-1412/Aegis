@@ -15,7 +15,10 @@ def _parse_dt(iso: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-@tool("prometheus_query_range", description="按时间范围执行 PromQL 查询，返回时间序列数据及元信息。")
+@tool(
+    "prometheus_query_range",
+    description="按时间范围执行 PromQL 查询，返回时间序列数据及元信息，适用于 Todo_List 项目的各类服务与基础设施指标分析。",
+)
 async def prometheus_query_range(
     promql: str,
     start_iso: str,
@@ -49,4 +52,3 @@ async def prometheus_query_range(
         "result_type": data.get("data", {}).get("resultType"),
         "series": series,
     }
-

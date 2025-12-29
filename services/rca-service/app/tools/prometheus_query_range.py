@@ -17,7 +17,7 @@ def _parse_dt(iso: str) -> datetime:
 
 @tool(
     "prometheus_query_range",
-    description="按时间范围执行 PromQL 查询，返回时间序列数据及原始结果概要。",
+    description="按时间范围执行 PromQL 查询，返回时间序列数据及原始结果概要，适用于 Todo_List 项目的服务健康与资源分析。",
 )
 async def prometheus_query_range(
     promql: str,
@@ -52,4 +52,3 @@ async def prometheus_query_range(
         "result_type": data.get("data", {}).get("resultType"),
         "series": series,
     }
-

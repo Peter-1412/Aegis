@@ -33,3 +33,5 @@ class PredictResponse(BaseModel):
 class LikelyFailures(BaseModel):
     likely_failures: list[str] = []
     explanation: str
+    risk_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_level: str | None = None

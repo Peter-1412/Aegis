@@ -117,10 +117,14 @@ async def predict(req: PredictRequest) -> PredictResponse:
     agent_input = (
         f"服务：{req.service_name}\n"
         f"回看小时数：{req.lookback_hours}\n\n"
-        "请按以下步骤执行：\n"
-        "1) 调用工具predict_collect_features获取错误计数与日志样本\n"
-        "2) 基于结果输出预测\n\n"
-        "输出必须是JSON对象，字段为：likely_failures, explanation。"
+        "请按以下步骤执行（可在必要时多次调用 prometheus_query_range 和 predict_collect_features）：\n"
+        "1) 使用 prometheus_query_range 分析该服务在回看窗口内的请求量、错误率、P95/P99 延迟以及关键业务指标走势；\n"
+        "2) 调用 predict_collect_features 获取该服务在 Loki 中的错误日志计数时间序列和代表性错误日志样本；\n"
+        "3) 结合指标与日志，从“是否存在明显上升趋势、新型错误模式、资源或依赖不稳定”等角度，主观评估未来一段时间的故障风险；\n"
+        "4) 给出未来可能发生的若干故障类型，以及简要中文解释（面向工程师）。\n\n"
+        "输出必须是JSON对象，字段为：risk_score, risk_level, likely_failures, explanation。\n"
+        "其中 risk_score 为 0.0~1.0 之间的小数，用于表示你对未来发生严重故障的主观概率判断；\n"
+        "risk_level 为字符串，例如 low、medium、high，需要与 risk_score 的高低相匹配。"
     )
     res = await executor.ainvoke({"input": agent_input})
     raw = str(res.get("output") or "")
@@ -143,8 +147,6 @@ async def predict(req: PredictRequest) -> PredictResponse:
 
     counts = np.array((features or {}).get("counts") or [], dtype=float)
     logs = (features or {}).get("logs") or []
-    score = _risk_from_counts(counts)
-    level = _risk_level(score)
 
     try:
         out = LikelyFailures.model_validate_json(raw)
@@ -156,7 +158,11 @@ async def predict(req: PredictRequest) -> PredictResponse:
                     "human",
                     "服务：{service}\n过去{hours}小时的错误计数时间序列（5m窗口）：{counts}\n"
                     "最近的错误日志样本（可能为空/截断）：\n{logs}\n\n"
-                    "请输出：可能出现的故障类型列表（最多6条）和一句话解释（面向工程师）。",
+                    "请输出：一个JSON对象，其中包含：\n"
+                    "1) risk_score：0.0~1.0 之间的小数，表示你对未来发生严重故障的主观概率判断；\n"
+                    "2) risk_level：风险等级字符串，例如 low、medium、high；\n"
+                    "3) likely_failures：未来可能出现的故障类型列表（最多6条）；\n"
+                    "4) explanation：一句话中文解释（面向工程师，说明主要依据）。",
                 ),
             ]
         )
@@ -171,10 +177,23 @@ async def predict(req: PredictRequest) -> PredictResponse:
             }
         )
 
+        explanation = out.explanation or "基于历史错误日志密度与趋势进行粗略风险估计。"
+    score = out.risk_score
+    if score is None:
+        score = _risk_from_counts(counts)
+    try:
+        score_f = float(score)
+    except Exception:
+        score_f = _risk_from_counts(counts)
+    if score_f < 0.0:
+        score_f = 0.0
+    if score_f > 1.0:
+        score_f = 1.0
+    level = out.risk_level or _risk_level(score_f)
     explanation = out.explanation or "基于历史错误日志密度与趋势进行粗略风险估计。"
     return PredictResponse(
         service_name=req.service_name,
-        risk_score=round(score, 3),
+        risk_score=round(score_f, 3),
         risk_level=level,
         likely_failures=out.likely_failures or [],
         explanation=explanation,
