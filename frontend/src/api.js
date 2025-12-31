@@ -123,6 +123,61 @@ export function rcaAnalyze({ description, startIso, endIso, sessionId }) {
   })
 }
 
+export async function rcaAnalyzeStream({ description, startIso, endIso, sessionId, onEvent, signal }) {
+  const path = '/api/rca/analyze/stream'
+  const res = await fetch(`${resolveBase(path)}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      description,
+      time_range: { start: startIso, end: endIso },
+      session_id: sessionId || null
+    }),
+    signal
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  const reader = res.body?.getReader ? res.body.getReader() : null
+  if (!reader) {
+    const text = await res.text()
+    try {
+      const json = JSON.parse(text)
+      onEvent?.(json)
+    } catch {
+      onEvent?.({ event: 'final', summary: text })
+    }
+    return
+  }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const chunk = decoder.decode(value, { stream: true })
+    buffer += chunk
+    while (true) {
+      const idx = buffer.indexOf('\n')
+      if (idx === -1) break
+      const line = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 1)
+      if (!line.trim()) continue
+      let parsed = null
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        parsed = null
+      }
+      if (parsed) {
+        onEvent?.(parsed)
+      }
+    }
+  }
+}
+
 export function predictRun({ serviceName, lookbackHours, sessionId }) {
   return httpJson('/api/predict/run', {
     method: 'POST',
@@ -132,4 +187,59 @@ export function predictRun({ serviceName, lookbackHours, sessionId }) {
       session_id: sessionId || null
     })
   })
+}
+
+export async function predictRunStream({ serviceName, lookbackHours, sessionId, onEvent, signal }) {
+  const path = '/api/predict/run/stream'
+  const res = await fetch(`${resolveBase(path)}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      service_name: serviceName,
+      lookback_hours: lookbackHours,
+      session_id: sessionId || null
+    }),
+    signal
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  const reader = res.body?.getReader ? res.body.getReader() : null
+  if (!reader) {
+    const text = await res.text()
+    try {
+      const json = JSON.parse(text)
+      onEvent?.(json)
+    } catch {
+      onEvent?.({ event: 'final', explanation: text })
+    }
+    return
+  }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const chunk = decoder.decode(value, { stream: true })
+    buffer += chunk
+    while (true) {
+      const idx = buffer.indexOf('\n')
+      if (idx === -1) break
+      const line = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 1)
+      if (!line.trim()) continue
+      let parsed = null
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        parsed = null
+      }
+      if (parsed) {
+        onEvent?.(parsed)
+      }
+    }
+  }
 }

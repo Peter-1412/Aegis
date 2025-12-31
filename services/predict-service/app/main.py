@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import asyncio
 import json
+from typing import AsyncIterator
 
 import numpy as np
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.prompts import ChatPromptTemplate
 
 from .llm import get_llm
@@ -107,9 +111,56 @@ def _build_trace(intermediate_steps) -> AgentTrace:
     return AgentTrace(steps=steps)
 
 
-@app.post("/api/predict/run", response_model=PredictResponse)
-async def predict(req: PredictRequest) -> PredictResponse:
-    llm = get_llm()
+class PredictStreamHandler(AsyncCallbackHandler):
+    def __init__(self, queue: asyncio.Queue):
+        self.queue = queue
+
+    async def on_llm_new_token(self, token: str, **kwargs):
+        await self.queue.put(
+            {
+                "event": "llm_token",
+                "token": token,
+            }
+        )
+
+    async def on_agent_action(self, action, **kwargs):
+        tool = getattr(action, "tool", "") or ""
+        tool_input = getattr(action, "tool_input", None)
+        log = getattr(action, "log", None)
+        await self.queue.put(
+            {
+                "event": "agent_action",
+                "tool": str(tool),
+                "tool_input": _stringify(tool_input),
+                "log": str(log) if log else None,
+            }
+        )
+
+    async def on_tool_start(self, serialized, input_str, **kwargs):
+        name = None
+        if isinstance(serialized, dict):
+            name = serialized.get("name") or serialized.get("tool")
+        if not name:
+            name = str(serialized)
+        await self.queue.put(
+            {
+                "event": "tool_start",
+                "tool": name,
+                "tool_input": _stringify(input_str),
+            }
+        )
+
+    async def on_tool_end(self, output, **kwargs):
+        await self.queue.put(
+            {
+                "event": "tool_end",
+                "observation": _stringify(output),
+            }
+        )
+
+
+async def _run_predict(req: PredictRequest, callbacks: list | None = None) -> PredictResponse:
+    llm = get_llm(streaming=callbacks is not None)
     tools = build_tools(loki)
     memory = get_memory(req.session_id)
     executor = build_executor(llm, tools, memory)
@@ -126,7 +177,8 @@ async def predict(req: PredictRequest) -> PredictResponse:
         "其中 risk_score 为 0.0~1.0 之间的小数，用于表示你对未来发生严重故障的主观概率判断；\n"
         "risk_level 为字符串，例如 low、medium、high，需要与 risk_score 的高低相匹配。"
     )
-    res = await executor.ainvoke({"input": agent_input})
+    config = {"callbacks": callbacks} if callbacks else None
+    res = await executor.ainvoke({"input": agent_input}, config=config)
     raw = str(res.get("output") or "")
     trace = _build_trace(res.get("intermediate_steps"))
 
@@ -174,10 +226,10 @@ async def predict(req: PredictRequest) -> PredictResponse:
                 "hours": req.lookback_hours,
                 "counts": counts[-48:].tolist(),
                 "logs": logs_text,
-            }
+            },
+            config=config,
         )
 
-        explanation = out.explanation or "基于历史错误日志密度与趋势进行粗略风险估计。"
     score = out.risk_score
     if score is None:
         score = _risk_from_counts(counts)
@@ -199,3 +251,51 @@ async def predict(req: PredictRequest) -> PredictResponse:
         explanation=explanation,
         trace=trace,
     )
+
+
+@app.post("/api/predict/run", response_model=PredictResponse)
+async def predict(req: PredictRequest) -> PredictResponse:
+    return await _run_predict(req)
+
+
+@app.post("/api/predict/run/stream")
+async def predict_stream(req: PredictRequest):
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def runner():
+        try:
+            handler = PredictStreamHandler(queue)
+            await queue.put(
+                {
+                    "event": "start",
+                    "service_name": req.service_name,
+                    "lookback_hours": req.lookback_hours,
+                }
+            )
+            res = await _run_predict(req, callbacks=[handler])
+            meta = {
+                "event": "final",
+                "service_name": res.service_name,
+                "risk_score": res.risk_score,
+                "risk_level": res.risk_level,
+                "likely_failures": res.likely_failures,
+                "explanation": res.explanation,
+                "trace": res.trace.dict() if res.trace else None,
+            }
+            await queue.put(meta)
+        except Exception as exc:
+            await queue.put({"event": "error", "message": str(exc)})
+        finally:
+            await queue.put({"event": "end"})
+
+    asyncio.create_task(runner())
+
+    async def iterator() -> AsyncIterator[bytes]:
+        while True:
+            item = await queue.get()
+            data = json.dumps(item, ensure_ascii=False) + "\n"
+            yield data.encode("utf-8")
+            if item.get("event") == "end":
+                break
+
+    return StreamingResponse(iterator(), media_type="application/x-ndjson")

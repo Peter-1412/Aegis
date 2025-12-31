@@ -7,7 +7,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from .settings import settings
 
 
-def get_llm() -> BaseChatModel:
+def get_llm(streaming: bool = False) -> BaseChatModel:
     from langchain_openai import ChatOpenAI
 
     api_key = settings.ark_api_key or os.environ.get("ARK_API_KEY")
@@ -18,4 +18,6 @@ def get_llm() -> BaseChatModel:
         api_key=api_key,
         base_url=base_url,
         temperature=0,
+        streaming=streaming,
+        extra_body={"reasoning_effort": "high"},
     )

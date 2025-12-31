@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { rcaAnalyze } from '../api'
+import { useMemo, useRef, useState } from 'react'
+import { rcaAnalyzeStream } from '../api'
 
 function newSessionId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -60,23 +60,142 @@ export default function RCAPage() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [sessionId, setSessionId] = useState(() => newSessionId())
+  const [thinking, setThinking] = useState('')
+  const controllerRef = useRef(null)
 
   async function onSubmit() {
+    if (controllerRef.current) {
+      controllerRef.current.abort()
+      controllerRef.current = null
+    }
+    const controller = new AbortController()
+    controllerRef.current = controller
     setLoading(true)
     setError('')
     setResult(null)
+    setThinking('')
     try {
-      const data = await rcaAnalyze({
+      await rcaAnalyzeStream({
         description,
         startIso: new Date(start).toISOString(),
         endIso: new Date(end).toISOString(),
-        sessionId
+        sessionId,
+        signal: controller.signal,
+        onEvent: (evt) => {
+          if (evt.event === 'start') {
+            setResult({
+              summary: '',
+              suspected_service: null,
+              root_cause: null,
+              evidence: [],
+              suggested_actions: [],
+              trace: { steps: [] }
+            })
+          } else if (evt.event === 'llm_token') {
+            setThinking((prev) => `${prev}${evt.token || ''}`)
+          } else if (evt.event === 'agent_action') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  summary: '',
+                  suspected_service: null,
+                  root_cause: null,
+                  evidence: [],
+                  suggested_actions: [],
+                  trace: { steps: [] }
+                }
+              const steps = base.trace?.steps || []
+              const index = steps.length
+              const step = {
+                index,
+                tool: evt.tool || '',
+                tool_input: evt.tool_input || null,
+                observation: evt.log || null,
+                log: evt.log || null
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps, step] }
+              }
+            })
+          } else if (evt.event === 'tool_start') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  summary: '',
+                  suspected_service: null,
+                  root_cause: null,
+                  evidence: [],
+                  suggested_actions: [],
+                  trace: { steps: [] }
+                }
+              const steps = base.trace?.steps || []
+              const index = steps.length
+              const step = {
+                index,
+                tool: evt.tool || '',
+                tool_input: evt.tool_input || null,
+                observation: null,
+                log: null
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps, step] }
+              }
+            })
+          } else if (evt.event === 'tool_end') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  summary: '',
+                  suspected_service: null,
+                  root_cause: null,
+                  evidence: [],
+                  suggested_actions: [],
+                  trace: { steps: [] }
+                }
+              const steps = base.trace?.steps || []
+              if (!steps.length) return base
+              const last = steps[steps.length - 1]
+              const updated = {
+                ...last,
+                observation: evt.observation || last.observation
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps.slice(0, -1), updated] }
+              }
+            })
+          } else if (evt.event === 'final') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  summary: '',
+                  suspected_service: null,
+                  root_cause: null,
+                  evidence: [],
+                  suggested_actions: [],
+                  trace: { steps: [] }
+                }
+              return {
+                ...base,
+                summary: evt.summary || base.summary || '',
+                suspected_service: evt.suspected_service ?? base.suspected_service ?? null,
+                root_cause: evt.root_cause ?? base.root_cause ?? null,
+                evidence: evt.evidence ?? base.evidence ?? [],
+                suggested_actions: evt.suggested_actions ?? base.suggested_actions ?? [],
+                trace: evt.trace || base.trace || null
+              }
+            })
+          }
+        }
       })
-      setResult(data)
     } catch (e) {
+      if (e?.name === 'AbortError') return
       setError(e?.message || '请求失败')
     } finally {
       setLoading(false)
+      controllerRef.current = null
     }
   }
 
@@ -135,6 +254,16 @@ export default function RCAPage() {
           <div className="result">
             <div className="resultTitle">RCA 报告</div>
             <div style={{ whiteSpace: 'pre-wrap' }}>{result.summary}</div>
+
+            {thinking ? (
+              <>
+                <div style={{ height: 10 }} />
+                <div className="resultTitle">内心独白（LLM 原始推理流）</div>
+                <div className="mono" style={{ whiteSpace: 'pre-wrap' }}>
+                  {thinking}
+                </div>
+              </>
+            ) : null}
 
             <div style={{ height: 10 }} />
             <div className="row">

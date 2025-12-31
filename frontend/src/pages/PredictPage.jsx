@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { predictRun } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import { predictRunStream } from '../api'
 
 function newSessionId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -60,18 +60,141 @@ export default function PredictPage() {
   const [result, setResult] = useState(null)
   const [sessionId, setSessionId] = useState(() => newSessionId())
   const [flash, setFlash] = useState(false)
+  const [thinking, setThinking] = useState('')
+  const controllerRef = useRef(null)
 
   async function onSubmit() {
+    if (controllerRef.current) {
+      controllerRef.current.abort()
+      controllerRef.current = null
+    }
+    const controller = new AbortController()
+    controllerRef.current = controller
     setLoading(true)
     setError('')
     setResult(null)
+    setThinking('')
     try {
-      const data = await predictRun({ serviceName, lookbackHours, sessionId })
-      setResult(data)
+      await predictRunStream({
+        serviceName,
+        lookbackHours,
+        sessionId,
+        signal: controller.signal,
+        onEvent: (evt) => {
+          if (evt.event === 'start') {
+            setResult({
+              service_name: serviceName,
+              risk_score: 0,
+              risk_level: 'low',
+              likely_failures: [],
+              explanation: '',
+              trace: { steps: [] }
+            })
+          } else if (evt.event === 'llm_token') {
+            setThinking((prev) => `${prev}${evt.token || ''}`)
+          } else if (evt.event === 'agent_action') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  service_name: serviceName,
+                  risk_score: 0,
+                  risk_level: 'low',
+                  likely_failures: [],
+                  explanation: '',
+                  trace: { steps: [] }
+                }
+              const steps = base.trace?.steps || []
+              const index = steps.length
+              const step = {
+                index,
+                tool: evt.tool || '',
+                tool_input: evt.tool_input || null,
+                observation: evt.log || null,
+                log: evt.log || null
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps, step] }
+              }
+            })
+          } else if (evt.event === 'tool_start') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  service_name: serviceName,
+                  risk_score: 0,
+                  risk_level: 'low',
+                  likely_failures: [],
+                  explanation: '',
+                  trace: { steps: [] }
+                }
+              const steps = base.trace?.steps || []
+              const index = steps.length
+              const step = {
+                index,
+                tool: evt.tool || '',
+                tool_input: evt.tool_input || null,
+                observation: null,
+                log: null
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps, step] }
+              }
+            })
+          } else if (evt.event === 'tool_end') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  service_name: serviceName,
+                  risk_score: 0,
+                  risk_level: 'low',
+                  likely_failures: [],
+                  explanation: '',
+                  trace: { steps: [] }
+                }
+              const steps = base.trace?.steps || []
+              if (!steps.length) return base
+              const last = steps[steps.length - 1]
+              const updated = {
+                ...last,
+                observation: evt.observation || last.observation
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps.slice(0, -1), updated] }
+              }
+            })
+          } else if (evt.event === 'final') {
+            setResult((prev) => {
+              const base =
+                prev || {
+                  service_name: serviceName,
+                  risk_score: 0,
+                  risk_level: 'low',
+                  likely_failures: [],
+                  explanation: '',
+                  trace: { steps: [] }
+                }
+              return {
+                ...base,
+                service_name: evt.service_name || base.service_name || serviceName,
+                risk_score: evt.risk_score ?? base.risk_score ?? 0,
+                risk_level: evt.risk_level || base.risk_level || 'low',
+                likely_failures: evt.likely_failures ?? base.likely_failures ?? [],
+                explanation: evt.explanation || base.explanation || '',
+                trace: evt.trace || base.trace || null
+              }
+            })
+          }
+        }
+      })
     } catch (e) {
+      if (e?.name === 'AbortError') return
       setError(e?.message || '请求失败')
     } finally {
       setLoading(false)
+      controllerRef.current = null
     }
   }
 
@@ -171,6 +294,16 @@ export default function PredictPage() {
 
             <div style={{ height: 10 }} />
             <div style={{ whiteSpace: 'pre-wrap' }}>{result.explanation}</div>
+
+            {thinking ? (
+              <>
+                <div style={{ height: 10 }} />
+                <div className="resultTitle">内心独白（LLM 原始推理流）</div>
+                <div className="mono" style={{ whiteSpace: 'pre-wrap' }}>
+                  {thinking}
+                </div>
+              </>
+            ) : null}
 
             {(result.likely_failures?.length || 0) > 0 ? (
               <>
