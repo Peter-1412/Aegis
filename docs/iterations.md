@@ -17,6 +17,7 @@
 | v0.4 | 将所有 `ai-log-agent` 命名统一调整为 `aegis`，包含 K8s 部署等。 |
 | v0.5 | 结合 Todo_List 监控手册重写系统 Prompt，升级 Predict 为 LLM 主导。 |
 | v0.6 | 修复 Prompt 花括号与 Prometheus 时间解析导致的 500 等鲁棒性问题。 |
+| v0.7 | 引入三服务流式输出与前端短时间窗口预设，并强化 Prompt 与监控手册一致性。 |
 
 以下按版本详细记录关键变更与缺陷。
 
@@ -230,7 +231,68 @@
    - 这对后续迭代 Prompt、分析问题非常关键。
 
 5. **命名与资源管理要统一**
-   - 从 `ai-log-agent` 统一到 `aegis` 的过程提示我们，项目命名应尽早统一，避免后期大规模重命名。
+233→   - 从 `ai-log-agent` 统一到 `aegis` 的过程提示我们，项目命名应尽早统一，避免后期大规模重命名。
+234→
+235→未来如果继续演进 Aegis，建议在每次版本迭代时同步更新本文件，保持“事件 → 原因 → 修复 → 启示”的闭环记录。
 
-未来如果继续演进 Aegis，建议在每次版本迭代时同步更新本文件，保持“事件 → 原因 → 修复 → 启示”的闭环记录。
+---
 
+## 9. v0.7：流式输出改造与短时间窗口优化
+
+### 9.1 功能：三服务流式输出与前端内心独白
+
+- ChatOps / RCA / Predict 三个服务的 LLM 封装统一改为支持 `streaming` 参数：
+  - 使用 LangChain 的 `ChatOpenAI(streaming=True)` 以及 `AsyncCallbackHandler`。
+  - 通过 `extra_body={"reasoning_effort": "high"}` 打开模型的推理模式。
+- 为 ChatOps / RCA / Predict 分别新增流式接口：
+  - ChatOps：`POST /api/chatops/query/stream`（原有，作为统一规范的参考）。
+  - RCA：`POST /api/rca/analyze/stream`。
+  - Predict：`POST /api/predict/run/stream`。
+- 统一采用 NDJSON 协议进行前后端流式通信：
+  - 事件类型包括：`start`、`llm_token`、`agent_action`、`tool_start`、`tool_end`、`final`、`end`。
+  - `final` 事件返回完整业务结构（ChatOps 的 answer / used_logql，RCA 的 summary / evidence 等，Predict 的 risk_score / risk_level 等）。
+- 前端三个页面中：
+  - ChatOps：展示“内心独白（LLM 原始推理流）”与 ReAct 工具调用步骤（Trace 面板）。
+  - RCA：新增流式展示 RCA 报告生成过程与内心独白，实时渲染工具调用轨迹。
+  - Predict：在“未来风险预测”场景中展示流式推理过程，保留高风险场景的红色视觉提示。
+
+### 9.2 功能：健康检查与时间窗口优化
+
+- K8s 健康检查：
+  - 将 ChatOps / RCA / Predict 三个服务的 `readinessProbe` 周期从 10 秒统一调整为 60 秒。
+  - 目的：减少 `/healthz` 请求在 Loki 中造成的大量日志噪音，同时保持 Pod 就绪探针的行为不变。
+- 前端时间窗口预设优化：
+  - ChatOps：
+    - 将时间范围选择从“15/30/60 分钟、6 小时”扩展为：
+      - 5 / 10 / 15 / 20 / 25 / 30 / 60 分钟，以及 6 小时。
+    - 方便在日志保留时间较短的测试集群中进行更精细的短时查询。
+  - Predict：
+    - 在遵守后端 `lookback_hours >= 1` 约束的前提下，增加更短的整点窗口：
+      - 1 / 2 / 4 / 6 / 24 小时，以及 3 / 7 天。
+    - 默认回看窗口从 24 小时调整为 6 小时，更偏向近期风险分析。
+
+### 9.3 功能：Prompt 与监控查询手册对齐
+
+- 对照 `docs/monitoring_queries_agent.md`，检查 ChatOps / RCA / Predict 三个服务的系统 Prompt：
+  - 确保统一强调：
+    - PromQL 只能基于真实存在的指标名，不允许臆造。
+    - Loki 选择器仅使用 Kubernetes 原生标签（`namespace、app、pod、container、job、node_name、filename、stream`），业务字段如 `service=`、`level=` 必须用 `|=` 或 `|~` 文本过滤。
+    - 分析流程遵循“先 Prometheus 做宏观判断，再 Loki 看错误日志细节”的原则。
+    - 查询不到数据或指标不存在时，必须如实说明环境限制，禁止编造结果。
+- 在 RCA 服务的 Prompt 中新增明确说明：
+  - `使用 Prometheus 时…不能凭空臆造不存在的指标。`
+  - `使用 Prometheus 或 Loki 查询不到数据时，必须如实说明当前环境未暴露对应指标或缺少相关日志，禁止编造查询结果。`
+
+### 9.4 启示与后续约定
+
+- 流式输出对调试与用户体验的价值：
+  - 开发阶段可以通过“内心独白 + Trace”快速理解 Agent 的工具调用路径和推理过程，有助于迭代 Prompt 与工具设计。
+  - 用户侧可以感知到实时思考过程，明显优于一次性返回的大段文本。
+- 健康检查与日志噪音的平衡：
+  - 就绪探针频率过高会在 Loki 中产生大量无意义日志，应根据场景调整探针周期。
+  - 业务日志与运维日志需要在“稳定性监控”和“可观测性噪音”之间找到平衡点。
+- 版本演进过程中的文档同步：
+  - 从 v0.7 开始，每次对三服务、前端或公共工具做出非 trivial 变更时，都应同步更新本迭代表，说明：
+    - 变更点（功能/缺陷修复）。
+    - 根因与修复方式（如果是缺陷）。
+    - 对后续设计的启示。
