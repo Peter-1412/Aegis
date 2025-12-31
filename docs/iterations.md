@@ -261,6 +261,9 @@
 - K8s 健康检查：
   - 将 ChatOps / RCA / Predict 三个服务的 `readinessProbe` 周期从 10 秒统一调整为 60 秒。
   - 目的：减少 `/healthz` 请求在 Loki 中造成的大量日志噪音，同时保持 Pod 就绪探针的行为不变。
+- 三个服务的访问日志优化：
+  - 在 ChatOps / RCA / Predict 三个服务中，为 `uvicorn.access` 日志增加 `_HealthzAccessFilter` 过滤器。
+  - 过滤规则：凡是访问路径包含 `/healthz` 的请求一律不写入访问日志，从源头降低健康检查对 Loki 的干扰。
 - 前端时间窗口预设优化：
   - ChatOps：
     - 将时间范围选择从“15/30/60 分钟、6 小时”扩展为：
@@ -275,13 +278,25 @@
 
 - 对照 `docs/monitoring_queries_agent.md`，检查 ChatOps / RCA / Predict 三个服务的系统 Prompt：
   - 确保统一强调：
-    - PromQL 只能基于真实存在的指标名，不允许臆造。
-    - Loki 选择器仅使用 Kubernetes 原生标签（`namespace、app、pod、container、job、node_name、filename、stream`），业务字段如 `service=`、`level=` 必须用 `|=` 或 `|~` 文本过滤。
-    - 分析流程遵循“先 Prometheus 做宏观判断，再 Loki 看错误日志细节”的原则。
-    - 查询不到数据或指标不存在时，必须如实说明环境限制，禁止编造结果。
+  - PromQL 只能基于真实存在的指标名，不允许臆造。
+  - Loki 选择器仅使用 Kubernetes 原生标签（`namespace、app、pod、container、job、node_name、filename、stream`），业务字段如 `service=`、`level=` 必须用 `|=` 或 `|~` 文本过滤。
+  - 分析流程遵循“先 Prometheus 做宏观判断，再 Loki 看错误日志细节”的原则。
+  - 查询不到数据或指标不存在时，必须如实说明环境限制，禁止编造结果。
 - 在 RCA 服务的 Prompt 中新增明确说明：
   - `使用 Prometheus 时…不能凭空臆造不存在的指标。`
   - `使用 Prometheus 或 Loki 查询不到数据时，必须如实说明当前环境未暴露对应指标或缺少相关日志，禁止编造查询结果。`
+
+### 9.5 功能：前端临时存储与交互体验优化
+
+- ChatOps 页面：
+  - 通过浏览器 `localStorage` 持久化“问题文本”和“时间范围选择（lastMinutes）”。
+  - 切换到 RCA / Predict 再切回时，自动恢复上一次输入内容和时间范围。
+- RCA 页面：
+  - 持久化“故障描述”“开始时间”“结束时间”，避免在多次尝试不同分析策略时频繁重复输入。
+- Predict 页面：
+  - 持久化“服务名”和“回看小时数”，便于对同一服务进行多轮风险预测与对比。
+- 统一约定：
+  - 所有临时存储均使用当前浏览器的 `localStorage`，仅在本地生效，不涉及服务端状态或隐私上传。
 
 ### 9.4 启示与后续约定
 

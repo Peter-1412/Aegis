@@ -5,6 +5,8 @@ import asyncio
 import json
 from typing import AsyncIterator
 
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -18,6 +20,25 @@ from .settings import settings
 from .agent.executor import build_executor
 from .memory.store import get_memory
 from .tools import build_tools
+
+
+class _HealthzAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            args = record.args
+            if isinstance(args, tuple) and len(args) >= 2:
+                req = args[1]
+                if isinstance(req, str) and "/healthz" in req:
+                    return False
+            msg = record.getMessage()
+            if "/healthz" in msg:
+                return False
+        except Exception:
+            return True
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_HealthzAccessFilter())
 
 
 app = FastAPI(title="RCA Service", version="0.1.0")

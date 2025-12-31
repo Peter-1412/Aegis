@@ -63,6 +63,32 @@ export default function PredictPage() {
   const [thinking, setThinking] = useState('')
   const controllerRef = useRef(null)
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem('aegis-predict-state')
+    if (!raw) return
+    try {
+      const data = JSON.parse(raw)
+      if (typeof data.serviceName === 'string') {
+        setServiceName(data.serviceName)
+      }
+      if (typeof data.lookbackHours === 'number') {
+        setLookbackHours(data.lookbackHours)
+      }
+    } catch {
+      void 0
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const data = {
+      serviceName,
+      lookbackHours
+    }
+    window.localStorage.setItem('aegis-predict-state', JSON.stringify(data))
+  }, [serviceName, lookbackHours])
+
   async function onSubmit() {
     if (controllerRef.current) {
       controllerRef.current.abort()

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { rcaAnalyzeStream } from '../api'
 
 function newSessionId() {
@@ -62,6 +62,36 @@ export default function RCAPage() {
   const [sessionId, setSessionId] = useState(() => newSessionId())
   const [thinking, setThinking] = useState('')
   const controllerRef = useRef(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem('aegis-rca-state')
+    if (!raw) return
+    try {
+      const data = JSON.parse(raw)
+      if (typeof data.description === 'string') {
+        setDescription(data.description)
+      }
+      if (typeof data.start === 'string') {
+        setStart(data.start)
+      }
+      if (typeof data.end === 'string') {
+        setEnd(data.end)
+      }
+    } catch {
+      void 0
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const data = {
+      description,
+      start,
+      end
+    }
+    window.localStorage.setItem('aegis-rca-state', JSON.stringify(data))
+  }, [description, start, end])
 
   async function onSubmit() {
     if (controllerRef.current) {

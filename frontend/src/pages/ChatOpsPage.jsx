@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { chatopsQueryStream } from '../api'
 
 function newSessionId() {
@@ -69,6 +69,32 @@ export default function ChatOpsPage() {
   const [sessionId, setSessionId] = useState(() => newSessionId())
   const [thinking, setThinking] = useState('')
   const controllerRef = useRef(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem('aegis-chatops-state')
+    if (!raw) return
+    try {
+      const data = JSON.parse(raw)
+      if (typeof data.question === 'string') {
+        setQuestion(data.question)
+      }
+      if (typeof data.lastMinutes === 'number') {
+        setLastMinutes(data.lastMinutes)
+      }
+    } catch {
+      void 0
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const data = {
+      question,
+      lastMinutes
+    }
+    window.localStorage.setItem('aegis-chatops-state', JSON.stringify(data))
+  }, [question, lastMinutes])
 
   async function onSubmit() {
     if (controllerRef.current) {
