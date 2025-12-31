@@ -200,11 +200,18 @@ async def _run_predict(req: PredictRequest, callbacks: list | None = None) -> Pr
     )
     config = {"callbacks": callbacks} if callbacks else None
     res = await executor.ainvoke({"input": agent_input}, config=config)
+    if not isinstance(res, dict):
+        res = {"output": res}
     raw = str(res.get("output") or "")
-    trace = _build_trace(res.get("intermediate_steps"))
+    intermediate_steps = res.get("intermediate_steps") or []
+    trace = _build_trace(intermediate_steps)
 
     features: dict | None = None
-    for action, observation in res.get("intermediate_steps") or []:
+    for pair in intermediate_steps:
+        try:
+            action, observation = pair
+        except Exception:
+            continue
         tool_name = getattr(action, "tool", None)
         if tool_name == "predict_collect_features":
             if isinstance(observation, dict):

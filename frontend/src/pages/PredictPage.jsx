@@ -212,6 +212,8 @@ export default function PredictPage() {
                 trace: evt.trace || base.trace || null
               }
             })
+          } else if (evt.event === 'error') {
+            setError(evt.message || '服务内部错误')
           }
         }
       })
