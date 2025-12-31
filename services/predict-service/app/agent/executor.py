@@ -52,4 +52,5 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
         verbose=True,
         handle_parsing_errors=True,
         return_intermediate_steps=True,
+        max_iterations=8,
     )

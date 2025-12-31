@@ -180,7 +180,11 @@ class PredictStreamHandler(AsyncCallbackHandler):
         )
 
 
+logger = logging.getLogger(__name__)
+
+
 async def _run_predict(req: PredictRequest, callbacks: list | None = None) -> PredictResponse:
+    logger.info("predict _run_predict start service=%s lookback_hours=%s", req.service_name, req.lookback_hours)
     llm = get_llm(streaming=callbacks is not None)
     tools = build_tools(loki)
     memory = get_memory(req.session_id)
@@ -300,7 +304,17 @@ async def predict_stream(req: PredictRequest):
                     "lookback_hours": req.lookback_hours,
                 }
             )
-            res = await _run_predict(req, callbacks=[handler])
+            try:
+                timeout_s = settings.request_timeout_s + 60.0
+                res = await asyncio.wait_for(_run_predict(req, callbacks=[handler]), timeout=timeout_s)
+            except asyncio.TimeoutError:
+                await queue.put(
+                    {
+                        "event": "error",
+                        "message": "预测任务超时，请检查 Prometheus/Loki/LLM 可用性后重试。",
+                    }
+                )
+                return
             meta = {
                 "event": "final",
                 "service_name": res.service_name,
