@@ -54,7 +54,7 @@ function riskColor(level) {
 
 export default function PredictPage() {
   const [serviceName, setServiceName] = useState('todo-service')
-  const [lookbackHours, setLookbackHours] = useState(24)
+  const [lookbackHours, setLookbackHours] = useState(6)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
@@ -256,6 +256,9 @@ export default function PredictPage() {
         <div className="field">
           <div className="label">回看窗口</div>
           <select className="select" value={lookbackHours} onChange={(e) => setLookbackHours(Number(e.target.value))}>
+            <option value={1}>最近 1 小时</option>
+            <option value={2}>最近 2 小时</option>
+            <option value={4}>最近 4 小时</option>
             <option value={6}>最近 6 小时</option>
             <option value={24}>最近 24 小时</option>
             <option value={72}>最近 3 天</option>

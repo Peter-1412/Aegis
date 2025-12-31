@@ -49,7 +49,11 @@ function TracePanel({ trace }) {
 export default function ChatOpsPage() {
   const presets = useMemo(
     () => [
+      { label: '最近 5 分钟', minutes: 5 },
+      { label: '最近 10 分钟', minutes: 10 },
       { label: '最近 15 分钟', minutes: 15 },
+      { label: '最近 20 分钟', minutes: 20 },
+      { label: '最近 25 分钟', minutes: 25 },
       { label: '最近 30 分钟', minutes: 30 },
       { label: '最近 60 分钟', minutes: 60 },
       { label: '最近 6 小时', minutes: 6 * 60 }
