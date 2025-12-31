@@ -286,6 +286,11 @@
   - `使用 Prometheus 时…不能凭空臆造不存在的指标。`
   - `使用 Prometheus 或 Loki 查询不到数据时，必须如实说明当前环境未暴露对应指标或缺少相关日志，禁止编造查询结果。`
 
+- Predict 时间窗口与 Prometheus 查询约束修复：
+  - 为 Predict 服务的 `prometheus_query_range` 新增相对时间语法支持：当 `start_iso` 为 `LOOKBACK_{N}_HOURS_START` 时，后端自动将时间窗口解析为“当前时间往前 N 小时”，避免 Agent 使用示例日期（如 2024-05-20）导致回看范围与实际时间不符。
+  - 在 Predict 的系统 Prompt 中明确约定：调用 `prometheus_query_range` 时禁止自行填写具体日期时间，必须使用 `LOOKBACK_{lookback_hours}_HOURS_START` 占位符，让后端根据用户选择的回看小时数计算真实时间范围。
+  - 调整 `predict_collect_features` 的返回结构，将 `logql` 字段改为直接返回标准 LogQL 字符串，方便在前端 Trace 中直观展示并复制到 Loki 控制台执行。
+
 ### 9.5 功能：前端临时存储与交互体验优化
 
 - ChatOps 页面：

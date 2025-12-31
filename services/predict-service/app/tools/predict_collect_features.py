@@ -63,9 +63,8 @@ def make_predict_collect_features(loki: LokiClient):
             "lookback_hours": lookback_hours,
             "counts": counts[-288:],
             "logs": evidence,
-            "logql": {"log_query": log_query},
+            "logql": log_query,
             "loki_api": {"path": "/loki/api/v1/query_range"},
         }
 
     return predict_collect_features
-

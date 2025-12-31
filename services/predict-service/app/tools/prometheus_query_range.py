@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import re
 import httpx
 from langchain_core.tools import tool
 
@@ -25,17 +26,34 @@ async def prometheus_query_range(
     end_iso: str,
     step: str = "60s",
 ) -> dict:
-    try:
-        start = _parse_dt(start_iso)
-        end = _parse_dt(end_iso)
-    except Exception as exc:
-        return {
-            "error": "invalid_datetime",
-            "message": str(exc),
-            "promql": promql,
-            "start_raw": start_iso,
-            "end_raw": end_iso,
-        }
+    lookback_match = re.fullmatch(r"LOOKBACK_(\d+)_HOURS_START", (start_iso or "").strip())
+    if lookback_match:
+        try:
+            hours = int(lookback_match.group(1))
+            if hours <= 0:
+                raise ValueError("hours must be positive")
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(hours=hours)
+        except Exception as exc:
+            return {
+                "error": "invalid_datetime",
+                "message": str(exc),
+                "promql": promql,
+                "start_raw": start_iso,
+                "end_raw": end_iso,
+            }
+    else:
+        try:
+            start = _parse_dt(start_iso)
+            end = _parse_dt(end_iso)
+        except Exception as exc:
+            return {
+                "error": "invalid_datetime",
+                "message": str(exc),
+                "promql": promql,
+                "start_raw": start_iso,
+                "end_raw": end_iso,
+            }
     params = {
         "query": promql,
         "start": start.isoformat(),
