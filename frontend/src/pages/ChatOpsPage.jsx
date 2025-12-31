@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { chatopsQuery } from '../api'
+import { useMemo, useRef, useState } from 'react'
+import { chatopsQueryStream } from '../api'
 
 function newSessionId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -63,18 +63,107 @@ export default function ChatOpsPage() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [sessionId, setSessionId] = useState(() => newSessionId())
+  const [thinking, setThinking] = useState('')
+  const controllerRef = useRef(null)
 
   async function onSubmit() {
+    if (controllerRef.current) {
+      controllerRef.current.abort()
+      controllerRef.current = null
+    }
+    const controller = new AbortController()
+    controllerRef.current = controller
     setLoading(true)
     setError('')
     setResult(null)
+    setThinking('')
     try {
-      const data = await chatopsQuery({ question, lastMinutes, sessionId })
-      setResult(data)
+      await chatopsQueryStream({
+        question,
+        lastMinutes,
+        sessionId,
+        signal: controller.signal,
+        onEvent: (evt) => {
+          if (evt.event === 'start') {
+            setResult({
+              answer: '',
+              used_logql: null,
+              start: evt.start ? new Date(evt.start) : null,
+              end: evt.end ? new Date(evt.end) : null,
+              trace: { steps: [] }
+            })
+          } else if (evt.event === 'llm_token') {
+            setThinking((prev) => `${prev}${evt.token || ''}`)
+          } else if (evt.event === 'agent_action') {
+            setResult((prev) => {
+              const base = prev || { answer: '', used_logql: null, start: null, end: null, trace: { steps: [] } }
+              const steps = base.trace?.steps || []
+              const index = steps.length
+              const step = {
+                index,
+                tool: evt.tool || '',
+                tool_input: evt.tool_input || null,
+                observation: evt.log || null,
+                log: evt.log || null
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps, step] }
+              }
+            })
+          } else if (evt.event === 'tool_start') {
+            setResult((prev) => {
+              const base = prev || { answer: '', used_logql: null, start: null, end: null, trace: { steps: [] } }
+              const steps = base.trace?.steps || []
+              const index = steps.length
+              const step = {
+                index,
+                tool: evt.tool || '',
+                tool_input: evt.tool_input || null,
+                observation: null,
+                log: null
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps, step] }
+              }
+            })
+          } else if (evt.event === 'tool_end') {
+            setResult((prev) => {
+              const base = prev || { answer: '', used_logql: null, start: null, end: null, trace: { steps: [] } }
+              const steps = base.trace?.steps || []
+              if (!steps.length) return base
+              const last = steps[steps.length - 1]
+              const updated = {
+                ...last,
+                observation: evt.observation || last.observation
+              }
+              return {
+                ...base,
+                trace: { steps: [...steps.slice(0, -1), updated] }
+              }
+            })
+          } else if (evt.event === 'final') {
+            setResult((prev) => {
+              const base = prev || {}
+              return {
+                ...base,
+                answer: evt.answer || '',
+                used_logql: evt.used_logql || null,
+                start: evt.start ? new Date(evt.start) : base.start || null,
+                end: evt.end ? new Date(evt.end) : base.end || null,
+                trace: evt.trace || base.trace || null
+              }
+            })
+          }
+        }
+      })
     } catch (e) {
+      if (e?.name === 'AbortError') return
       setError(e?.message || '请求失败')
     } finally {
       setLoading(false)
+      controllerRef.current = null
     }
   }
 
@@ -130,6 +219,15 @@ export default function ChatOpsPage() {
           <div className="result">
             <div className="resultTitle">回答</div>
             <div style={{ whiteSpace: 'pre-wrap' }}>{result.answer}</div>
+            {thinking ? (
+              <>
+                <div style={{ height: 10 }} />
+                <div className="resultTitle">内心独白（LLM 原始推理流）</div>
+                <div className="mono" style={{ whiteSpace: 'pre-wrap' }}>
+                  {thinking}
+                </div>
+              </>
+            ) : null}
             {result.used_logql ? (
               <>
                 <div style={{ height: 10 }} />

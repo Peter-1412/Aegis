@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import asyncio
 import json
+from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .llm import get_llm
 from .loki_client import LokiClient
@@ -13,6 +16,8 @@ from .settings import settings
 from .agent.executor import build_executor
 from .memory.store import get_memory
 from .tools import build_tools
+
+from langchain_core.callbacks import AsyncCallbackHandler
 
 
 app = FastAPI(title="ChatOps Service", version="0.1.0")
@@ -121,8 +126,55 @@ def _build_trace(intermediate_steps) -> AgentTrace:
     return AgentTrace(steps=steps)
 
 
-@app.post("/api/chatops/query", response_model=ChatOpsQueryResponse)
-async def query(req: ChatOpsQueryRequest) -> ChatOpsQueryResponse:
+class ChatOpsStreamHandler(AsyncCallbackHandler):
+    def __init__(self, queue: asyncio.Queue):
+        self.queue = queue
+
+    async def on_llm_new_token(self, token: str, **kwargs):
+        await self.queue.put(
+            {
+                "event": "llm_token",
+                "token": token,
+            }
+        )
+
+    async def on_agent_action(self, action, **kwargs):
+        tool = getattr(action, "tool", "") or ""
+        tool_input = getattr(action, "tool_input", None)
+        log = getattr(action, "log", None)
+        await self.queue.put(
+            {
+                "event": "agent_action",
+                "tool": str(tool),
+                "tool_input": _stringify(tool_input),
+                "log": str(log) if log else None,
+            }
+        )
+
+    async def on_tool_start(self, serialized, input_str, **kwargs):
+        name = None
+        if isinstance(serialized, dict):
+            name = serialized.get("name") or serialized.get("tool")
+        if not name:
+            name = str(serialized)
+        await self.queue.put(
+            {
+                "event": "tool_start",
+                "tool": name,
+                "tool_input": _stringify(input_str),
+            }
+        )
+
+    async def on_tool_end(self, output, **kwargs):
+        await self.queue.put(
+            {
+                "event": "tool_end",
+                "observation": _stringify(output),
+            }
+        )
+
+
+async def _run_chatops(req: ChatOpsQueryRequest, callbacks: list | None = None) -> ChatOpsQueryResponse:
     start, end = _resolve_timerange(req.time_range)
     if end <= start:
         raise HTTPException(status_code=400, detail="end必须大于start。")
@@ -135,7 +187,7 @@ async def query(req: ChatOpsQueryRequest) -> ChatOpsQueryResponse:
     except Exception:
         service_values = []
 
-    llm = get_llm()
+    llm = get_llm(streaming=callbacks is not None)
     tools = build_tools(loki)
     memory = get_memory(req.session_id)
     executor = build_executor(llm, tools, memory)
@@ -147,9 +199,60 @@ async def query(req: ChatOpsQueryRequest) -> ChatOpsQueryResponse:
         f"已知服务列表（可能不完整）：{services_hint}\n"
         "请在必要时调用工具查询Loki，然后给出最终答案。"
     )
-    out = await executor.ainvoke({"input": agent_input})
+    config = {"callbacks": callbacks} if callbacks else None
+    out = await executor.ainvoke({"input": agent_input}, config=config)
     answer = str(out.get("output") or "").strip()
     intermediate_steps = out.get("intermediate_steps")
     trace = _build_trace(intermediate_steps)
     used_logql = _extract_used_logql(intermediate_steps)
     return ChatOpsQueryResponse(answer=answer, used_logql=used_logql, start=start_cst, end=end_cst, trace=trace)
+
+
+@app.post("/api/chatops/query", response_model=ChatOpsQueryResponse)
+async def query(req: ChatOpsQueryRequest) -> ChatOpsQueryResponse:
+    return await _run_chatops(req)
+
+
+@app.post("/api/chatops/query/stream")
+async def query_stream(req: ChatOpsQueryRequest):
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def runner():
+        try:
+            handler = ChatOpsStreamHandler(queue)
+            start, end = _resolve_timerange(req.time_range)
+            start_cst = _to_cst(start)
+            end_cst = _to_cst(end)
+            await queue.put(
+                {
+                    "event": "start",
+                    "start": start_cst.isoformat(),
+                    "end": end_cst.isoformat(),
+                }
+            )
+            res = await _run_chatops(req, callbacks=[handler])
+            meta = {
+                "event": "final",
+                "answer": res.answer,
+                "used_logql": res.used_logql,
+                "start": res.start.isoformat() if res.start else None,
+                "end": res.end.isoformat() if res.end else None,
+                "trace": res.trace.dict() if res.trace else None,
+            }
+            await queue.put(meta)
+        except Exception as exc:
+            await queue.put({"event": "error", "message": str(exc)})
+        finally:
+            await queue.put({"event": "end"})
+
+    asyncio.create_task(runner())
+
+    async def iterator() -> AsyncIterator[bytes]:
+        while True:
+            item = await queue.get()
+            data = json.dumps(item, ensure_ascii=False) + "\n"
+            yield data.encode("utf-8")
+            if item.get("event") == "end":
+                break
+
+    return StreamingResponse(iterator(), media_type="application/x-ndjson")
