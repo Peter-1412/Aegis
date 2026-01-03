@@ -18,6 +18,7 @@
 | v0.5 | 结合 Todo_List 监控手册重写系统 Prompt，升级 Predict 为 LLM 主导。 |
 | v0.6 | 修复 Prompt 花括号与 Prometheus 时间解析导致的 500 等鲁棒性问题。 |
 | v0.7 | 引入三服务流式输出与前端短时间窗口预设，并强化 Prompt 与监控手册一致性。 |
+| v0.8 | 重构 Agent 可视化与操作流时间轴，并修复 Predict 卡死问题。       |
 
 以下按版本详细记录关键变更与缺陷。
 
@@ -316,3 +317,77 @@
     - 变更点（功能/缺陷修复）。
     - 根因与修复方式（如果是缺陷）。
     - 对后续设计的启示。
+
+---
+
+## 10. v0.8：Agent 可视化重构与 Predict 稳定性修复
+
+### 10.1 缺陷 4：Predict 流式接口在部分请求下卡住
+
+**现象：**
+
+- `POST /api/predict/run/stream` 在部分复杂问题下会长时间无响应，浏览器端看起来“卡死”。
+- 后端无明显报错日志，只能看到流式连接一直占用，无法快速定位哪里卡住。
+
+**根因：**
+
+- Predict 所用豆包大模型开启了 `reasoning_effort="high"` 的推理模式，单次推理成本和延迟显著上升。
+- Agent 执行缺乏硬性边界：
+  - `AgentExecutor` 未设置 `max_iterations`，在极端情况下可能在 ReAct 循环里“兜圈子”。
+  - 流式接口外层没有统一的超时控制，一旦某次调用卡住，请求就会一直挂起。
+- 日志中缺乏对单次 Predict 调用内部步骤的结构化记录，难以通过日志还原 Agent 的具体行为。
+
+**修复方案：**
+
+1. 降低 Predict LLM 的推理强度：
+   - 在 `services/predict-service/app/llm.py` 中，将豆包大模型的 `extra_body` 参数从高推理模式调整为：
+     - `extra_body={"reasoning_effort": "low"}`。
+   - 保证在 Predict 场景下优先满足“响应稳定、时延可控”，再在 Prompt 上约束其推理质量。
+2. 为 Agent 执行增加硬边界：
+   - 在 `services/predict-service/app/agent/executor.py` 中创建 `AgentExecutor` 时显式传入：
+     - `max_iterations=8`。
+   - 避免 LLM 在工具调用环中反复试探导致无上限迭代。
+3. 为流式接口增加统一超时与日志：
+   - 在 `services/predict-service/app/main.py` 中：
+     - 使用 `asyncio.wait_for(...)` 为流式推理增加统一超时（如 120 秒），超时后主动结束本次会话并返回错误事件。
+     - 在 `_run_predict` 等内部协程中补充结构化日志，记录：
+       - 预测请求的关键参数（服务名、时间窗口等）。
+       - 每一步 Agent 调用的工具名与简要结果（或失败原因）。
+
+**启示：**
+
+- 面向生产 SRE 场景时，LLM 的“推理能力”不能无限拔高，必须在模型层、Agent 层与接口层分别设置边界（tokens、迭代次数、超时时间）。
+- 对于“看起来只是卡住”的问题，统一的超时策略 + 结构化日志是排障的第一层安全网。
+
+### 10.2 功能：Agent 可视化重构与操作流时间轴
+
+**改动点：**
+
+- 后端统一重构三套服务的 Agent 流式回调，实现类似 TRAE IDE 的工作流可视化：
+  - 在 ChatOps / RCA / Predict 服务中，引入带会话上下文的流式回调处理器：
+    - 每个请求生成独立的 `session_id`。
+    - 内部维护自增的 `step_id` 与 `workflow_stage`（如 `thinking` / `planning` / `executing` / `observing`）。
+  - 通过 NDJSON 流或 WebSocket，将结构化事件实时推送给前端，事件统一包含：
+    - `event` / `event_type`：事件类型（如 `llm_token`、`agent_action`、`tool_start`、`tool_end`、`final` 等）。
+    - `workflow_stage`：当前步骤所属阶段，便于 UI 做分段展示。
+    - `step_id`：将同一次“思考 → 计划 → 执行 → 观察”的若干事件归为同一个步骤。
+    - `session_id` / `timestamp`：用于跨服务、跨组件追踪同一次分析会话。
+- 前端为三大页面补齐统一的“操作流时间轴”组件：
+  - ChatOps 页面：
+    - 新增 `AgentTimeline` 组件，将流式事件按 `step_id` 归组并按时间排序。
+    - 通过颜色区分不同 `workflow_stage`，直观展示 Agent 从“思考”到“执行工具”的完整路径。
+  - RCA 页面：
+    - 在 RCA 报告与 Trace 面板之间插入时间轴，展示每一步“收集证据 → 形成假设 → 验证”的过程。
+    - 与后端 `RCAStreamHandler` 输出的阶段信息对齐。
+  - Predict 页面：
+    - 为风险预测过程增加时间轴，展示模型如何逐步收集指标、组合信号并给出最终风险等级。
+    - 便于在高风险结论出现时，快速回溯其依据的指标与查询路径。
+
+**启示：**
+
+- Agent 系统的“可观测性”不只是日志与 Trace，还包括对 LLM 推理过程的结构化可视化：
+  - 统一事件 schema（`session_id` / `step_id` / `workflow_stage`）有利于前端构建通用的可视化组件。
+  - 从一开始就设计好“可视化友好”的回调协议，可以大幅降低后续排障和用户心智成本。
+- 将 ChatOps / RCA / Predict 三个场景的可视化能力统一之后：
+  - Prompt / 工具 / 流程差异被清晰暴露在时间轴与 Trace 中，便于后续针对性优化。
+  - 文档、演示与团队培训时，可以直接拿时间轴作为“Agent 行为说明书”，降低理解门槛。
