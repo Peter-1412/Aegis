@@ -302,6 +302,48 @@ sum by (app) (
   |~ "(?i)chat|request|response"
 ```
 
+#### 某个用户最近 N 分钟的操作行为（跨服务）
+
+在 Todo_List 的日志中，通常会同时出现用户名和内部用户 ID，例如：
+
+- user-service 日志行中可能包含：`user=peter user_id=22`
+- todo-service / ai-service 日志行中通常只包含：`user_id=22`
+
+当需要回答“某个用户在最近一段时间做了什么”时，建议按照下面的顺序构造查询：
+
+1. 先在 user-service 日志中根据用户名定位用户 ID：
+
+   ```logql
+   {namespace="todo-demo"}
+     |= "service=user-service"
+     |~ "(?i)login|signin"
+     |= "user=peter"
+   ```
+
+   从返回的日志中提取形如 `user_id=22` 的字段，记住该用户的 `user_id`。
+
+2. 再使用该 `user_id` 去 todo-service / ai-service 中查找业务操作日志：
+
+   ```logql
+   {namespace="todo-demo"}
+     |= "service=todo-service"
+     |= "user_id=22"
+   ```
+
+   ```logql
+   {namespace="todo-demo"}
+     |= "service=ai-service"
+     |= "user_id=22"
+   ```
+
+3. 将上述查询结果按时间排序，归纳该用户在最近 N 分钟内在各个服务上的主要行为，例如：
+
+   - 在 user-service 的登录 / 鉴权记录；
+   - 在 todo-service 的待办创建、更新、完成操作；
+   - 在 ai-service 中与 AI 助手的对话请求。
+
+如果在 user-service 中能找到该用户的登录记录，但在 todo-service / ai-service 中没有匹配到对应的 `user_id`，应在回答中明确说明“仅在 user-service 找到登录相关日志，暂未看到该用户在其他服务上的业务操作日志”。
+
 ### 3.4 聚合与统计
 
 **按服务统计最近 1 小时日志总量：**

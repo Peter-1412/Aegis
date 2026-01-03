@@ -20,6 +20,93 @@ const stageLabels = {
   observing: '观察'
 }
 
+function PrettyJson({ text }) {
+  if (text === null || text === undefined) return null
+  const raw = String(text)
+  const trimmed = raw.trim()
+  let parsed = null
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      parsed = null
+    }
+  }
+  if (!parsed) {
+    return (
+      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+        {raw}
+      </pre>
+    )
+  }
+  const isLogLines = typeof parsed === 'object' && parsed !== null && Array.isArray(parsed.lines)
+  if (isLogLines) {
+    const total = typeof parsed.line_count === 'number' ? parsed.line_count : parsed.lines.length
+    const previewCount = 50
+    const shown = parsed.lines.slice(0, previewCount)
+    return (
+      <div style={{ marginTop: 4 }}>
+        {parsed.logql ? (
+          <>
+            <div className="resultTitle" style={{ fontSize: 13 }}>
+              LogQL
+            </div>
+            <div className="mono" style={{ whiteSpace: 'pre-wrap', marginBottom: 6 }}>
+              {parsed.logql}
+            </div>
+          </>
+        ) : null}
+        <div className="mono" style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 4 }}>
+          时间范围：{parsed.start} → {parsed.end} · 行数：{total}
+        </div>
+        <div
+          style={{
+            borderRadius: 4,
+            border: '1px solid var(--border-subtle)',
+            padding: 8,
+            maxHeight: 260,
+            overflow: 'auto',
+            background: 'var(--bg-deep)'
+          }}
+        >
+          {shown.map((line, idx) => (
+            <div key={idx} className="mono" style={{ fontSize: 12, whiteSpace: 'pre' }}>
+              {line}
+            </div>
+          ))}
+          {parsed.lines.length > previewCount ? (
+            <div className="mono" style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
+              仅展示前 {previewCount} 行，更多可复制 LogQL 到 Loki 查看。
+            </div>
+          ) : null}
+        </div>
+        <details style={{ marginTop: 6 }}>
+          <summary className="mono" style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+            查看原始 JSON
+          </summary>
+          <div style={{ marginTop: 4 }}>
+            <pre className="mono" style={{ whiteSpace: 'pre', fontSize: 12 }}>
+              {JSON.stringify(parsed, null, 2)}
+            </pre>
+          </div>
+        </details>
+      </div>
+    )
+  }
+  return (
+    <details style={{ marginTop: 4 }}>
+      <summary className="mono" style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+        展开结构化结果
+      </summary>
+      <div style={{ marginTop: 4 }}>
+        <pre className="mono" style={{ whiteSpace: 'pre', fontSize: 12 }}>
+          {JSON.stringify(parsed, null, 2)}
+        </pre>
+      </div>
+    </details>
+  )
+}
+
 function AgentTimeline({ events }) {
   const steps = useMemo(() => {
     const byStep = new Map()
@@ -43,22 +130,10 @@ function AgentTimeline({ events }) {
     })
     return arr
   }, [events])
-
   const [activeStepId, setActiveStepId] = useState(null)
-
-  useEffect(() => {
-    if (!steps.length) {
-      setActiveStepId(null)
-      return
-    }
-    if (!activeStepId) {
-      setActiveStepId(steps[0].id)
-    }
-  }, [steps, activeStepId])
-
   if (!steps.length) return null
-
-  const activeStep = steps.find((s) => s.id === activeStepId) || steps[0]
+  const activeId = steps.some((s) => s.id === activeStepId) ? activeStepId : steps[0].id
+  const activeStep = steps.find((s) => s.id === activeId) || steps[0]
 
   return (
     <div className="result">
@@ -84,7 +159,7 @@ function AgentTimeline({ events }) {
               style={{
                 minWidth: 120,
                 borderRadius: 6,
-                border: step.id === activeStepId ? `2px solid ${color}` : '1px solid var(--border-subtle)',
+                border: step.id === activeId ? `2px solid ${color}` : '1px solid var(--border-subtle)',
                 padding: '6px 10px',
                 background: 'var(--bg-elevated)',
                 cursor: 'pointer',
@@ -193,9 +268,7 @@ function AgentTimeline({ events }) {
                   <div key={key} style={{ marginBottom: 8 }}>
                     <div className="resultTitle">工具决策：{e.tool}</div>
                     {e.tool_input ? (
-                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
-                        {e.tool_input}
-                      </pre>
+                      <PrettyJson text={e.tool_input} />
                     ) : null}
                   </div>
                 )
@@ -205,9 +278,7 @@ function AgentTimeline({ events }) {
                   <div key={key} style={{ marginBottom: 8 }}>
                     <div className="resultTitle">工具开始：{e.tool}</div>
                     {e.tool_input ? (
-                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
-                        {e.tool_input}
-                      </pre>
+                      <PrettyJson text={e.tool_input} />
                     ) : null}
                   </div>
                 )
@@ -217,9 +288,7 @@ function AgentTimeline({ events }) {
                   <div key={key} style={{ marginBottom: 8 }}>
                     <div className="resultTitle">工具结果</div>
                     {e.observation ? (
-                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
-                        {e.observation}
-                      </pre>
+                      <PrettyJson text={e.observation} />
                     ) : null}
                   </div>
                 )
@@ -275,18 +344,14 @@ function TracePanel({ trace }) {
               <>
                 <div style={{ height: 6 }} />
                 <div className="resultTitle">输入</div>
-                <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>
-                  {s.tool_input}
-                </pre>
+                <PrettyJson text={s.tool_input} />
               </>
             ) : null}
             {s.observation ? (
               <>
                 <div style={{ height: 6 }} />
                 <div className="resultTitle">观察</div>
-                <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>
-                  {s.observation}
-                </pre>
+                <PrettyJson text={s.observation} />
               </>
             ) : null}
           </div>
