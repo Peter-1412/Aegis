@@ -19,5 +19,6 @@ def get_llm(streaming: bool = False) -> BaseChatModel:
         base_url=base_url,
         temperature=0,
         streaming=streaming,
+        request_timeout=settings.request_timeout_s,
         extra_body={"reasoning_effort": "low"},
     )

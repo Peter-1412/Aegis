@@ -6,6 +6,257 @@ function newSessionId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+const stageColors = {
+  thinking: '#3498db',
+  planning: '#9b59b6',
+  executing: '#2ecc71',
+  observing: '#e67e22'
+}
+
+const stageLabels = {
+  thinking: '思考',
+  planning: '规划',
+  executing: '执行',
+  observing: '观察'
+}
+
+function AgentTimeline({ events }) {
+  const steps = useMemo(() => {
+    const byStep = new Map()
+    for (const evt of events || []) {
+      const stepId = evt.step_id || evt.stepId
+      if (!stepId) continue
+      if (!byStep.has(stepId)) {
+        byStep.set(stepId, {
+          id: stepId,
+          workflow_stage: evt.workflow_stage || 'thinking',
+          events: []
+        })
+      }
+      byStep.get(stepId).events.push(evt)
+    }
+    const arr = Array.from(byStep.values())
+    arr.sort((a, b) => {
+      const na = Number(String(a.id).replace('step-', '')) || 0
+      const nb = Number(String(b.id).replace('step-', '')) || 0
+      return na - nb
+    })
+    return arr
+  }, [events])
+
+  const [activeStepId, setActiveStepId] = useState(null)
+
+  useEffect(() => {
+    if (!steps.length) {
+      setActiveStepId(null)
+      return
+    }
+    if (!activeStepId) {
+      setActiveStepId(steps[0].id)
+    }
+  }, [steps, activeStepId])
+
+  if (!steps.length) return null
+
+  const activeStep = steps.find((s) => s.id === activeStepId) || steps[0]
+
+  return (
+    <div className="result">
+      <div className="resultTitle">Agent 执行流程（思考 / 规划 / 执行 / 观察）</div>
+      <div style={{ height: 8 }} />
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          overflowX: 'auto',
+          paddingBottom: 8
+        }}
+      >
+        {steps.map((step) => {
+          const stage = step.workflow_stage || 'thinking'
+          const color = stageColors[stage] || '#7f8c8d'
+          const label = stageLabels[stage] || stage
+          return (
+            <button
+              key={step.id}
+              type="button"
+              onClick={() => setActiveStepId(step.id)}
+              style={{
+                minWidth: 120,
+                borderRadius: 6,
+                border: step.id === activeStepId ? `2px solid ${color}` : '1px solid var(--border-subtle)',
+                padding: '6px 10px',
+                background: 'var(--bg-elevated)',
+                cursor: 'pointer',
+                textAlign: 'left'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginBottom: 4
+                }}
+              >
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    backgroundColor: color
+                  }}
+                />
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{label}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-normal)' }}>
+                {step.events.find((e) => e.event_type === 'agent_action')?.tool ||
+                  step.events.find((e) => e.event === 'agent_action')?.tool ||
+                  step.events.find((e) => e.event_type === 'trace_note')?.note ||
+                  step.events.find((e) => e.event_type === 'agent_thought')?.thought ||
+                  step.id}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      {activeStep ? (
+        <>
+          <div style={{ height: 8 }} />
+          <div
+            style={{
+              borderRadius: 6,
+              border: '1px solid var(--border-subtle)',
+              padding: 10,
+              background: 'var(--bg-elevated)'
+            }}
+          >
+            {activeStep.events.map((e, idx) => {
+              const key = `${activeStep.id}-${idx}-${e.event_type || e.event}`
+              const ts = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''
+              if (e.event_type === 'llm_start' || e.event === 'llm_start') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">LLM 调用开始</div>
+                    <div className="mono" style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                      {ts} · 模型：{e.model || '未知'}
+                    </div>
+                    {e.prompt ? (
+                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                        {e.prompt}
+                      </pre>
+                    ) : null}
+                  </div>
+                )
+              }
+              if (e.event_type === 'llm_end' || e.event === 'llm_end') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">LLM 输出</div>
+                    <div className="mono" style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                      {ts}
+                    </div>
+                    {e.response ? (
+                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                        {e.response}
+                      </pre>
+                    ) : null}
+                  </div>
+                )
+              }
+              if (e.event_type === 'agent_thought') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">Agent 思考</div>
+                    <div className="mono" style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                      {ts}
+                    </div>
+                    <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                      {e.thought}
+                    </pre>
+                  </div>
+                )
+              }
+              if (e.event_type === 'trace_note') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">trace_note</div>
+                    <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                      {e.note}
+                    </pre>
+                  </div>
+                )
+              }
+              if (e.event_type === 'agent_action' || e.event === 'agent_action') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">工具决策：{e.tool}</div>
+                    {e.tool_input ? (
+                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                        {e.tool_input}
+                      </pre>
+                    ) : null}
+                  </div>
+                )
+              }
+              if (e.event_type === 'tool_start' || e.event === 'tool_start') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">工具开始：{e.tool}</div>
+                    {e.tool_input ? (
+                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                        {e.tool_input}
+                      </pre>
+                    ) : null}
+                  </div>
+                )
+              }
+              if (e.event_type === 'tool_end' || e.event === 'tool_end') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">工具结果</div>
+                    {e.observation ? (
+                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                        {e.observation}
+                      </pre>
+                    ) : null}
+                  </div>
+                )
+              }
+              if (e.event_type === 'agent_observation') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle">Agent 观察</div>
+                    {e.observation ? (
+                      <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                        {e.observation}
+                      </pre>
+                    ) : null}
+                  </div>
+                )
+              }
+              if (e.event_type === 'error' || e.event === 'error') {
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div className="resultTitle" style={{ color: 'var(--danger)' }}>
+                      错误
+                    </div>
+                    <pre className="mono" style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                      {e.error_type || ''} {e.error_message || e.message || ''}
+                    </pre>
+                  </div>
+                )
+              }
+              return null
+            })}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 function TracePanel({ trace }) {
   const steps = trace?.steps || []
   if (!steps.length) return null
@@ -61,6 +312,7 @@ export default function RCAPage() {
   const [result, setResult] = useState(null)
   const [sessionId, setSessionId] = useState(() => newSessionId())
   const [thinking, setThinking] = useState('')
+  const [timelineEvents, setTimelineEvents] = useState([])
   const controllerRef = useRef(null)
 
   useEffect(() => {
@@ -104,6 +356,7 @@ export default function RCAPage() {
     setError('')
     setResult(null)
     setThinking('')
+    setTimelineEvents([])
     try {
       await rcaAnalyzeStream({
         description,
@@ -112,6 +365,12 @@ export default function RCAPage() {
         sessionId,
         signal: controller.signal,
         onEvent: (evt) => {
+          setTimelineEvents((prev) => {
+            if (!evt) return prev
+            if (evt.event === 'start') return []
+            if (evt.event === 'final' || evt.event === 'end') return prev
+            return [...prev, evt]
+          })
           if (evt.event === 'start') {
             setResult({
               summary: '',
@@ -317,6 +576,7 @@ export default function RCAPage() {
               </>
             ) : null}
           </div>
+          <AgentTimeline events={timelineEvents} />
           <TracePanel trace={result.trace} />
         </>
       ) : null}

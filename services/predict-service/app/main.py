@@ -6,9 +6,10 @@ import json
 from typing import AsyncIterator
 
 import logging
+import uuid
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -135,26 +136,96 @@ def _build_trace(intermediate_steps) -> AgentTrace:
 class PredictStreamHandler(AsyncCallbackHandler):
     def __init__(self, queue: asyncio.Queue):
         self.queue = queue
+        self.session_id = str(uuid.uuid4())
+        self.step_counter = 0
+        self.current_workflow_stage = "thinking"
+        self.current_step_id: str | None = None
+
+    def _next_step_id(self) -> str:
+        self.step_counter += 1
+        return f"step-{self.step_counter}"
+
+    async def _send_event(self, event_type: str, data: dict, workflow_stage: str | None = None):
+        payload = {
+            "event": event_type,
+            "event_type": event_type,
+            "workflow_stage": workflow_stage or self.current_workflow_stage,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "session_id": self.session_id,
+        }
+        payload.update(data)
+        await self.queue.put(payload)
+
+    async def on_llm_start(self, serialized, prompts, **kwargs):
+        self.current_workflow_stage = "thinking"
+        self.current_step_id = self._next_step_id()
+        prompt = prompts[0] if prompts else ""
+        model_name = None
+        if isinstance(serialized, dict):
+            model_name = serialized.get("kwargs", {}).get("model_name") or serialized.get("model_name") or serialized.get("model")
+        await self._send_event(
+            "llm_start",
+            {
+                "prompt": prompt,
+                "step_id": self.current_step_id,
+                "model": model_name or "unknown",
+            },
+        )
 
     async def on_llm_new_token(self, token: str, **kwargs):
-        await self.queue.put(
+        await self._send_event(
+            "llm_token",
             {
-                "event": "llm_token",
                 "token": token,
-            }
+                "step_id": self.current_step_id,
+            },
+        )
+
+    async def on_llm_end(self, response, **kwargs):
+        text = ""
+        try:
+            generations = getattr(response, "generations", None)
+            if generations:
+                first = generations[0][0]
+                value = getattr(first, "text", None) or getattr(first, "message", None)
+                if value is not None:
+                    text = str(value)
+        except Exception:
+            text = ""
+        await self._send_event(
+            "llm_end",
+            {
+                "response": text,
+                "step_id": self.current_step_id,
+            },
         )
 
     async def on_agent_action(self, action, **kwargs):
         tool = getattr(action, "tool", "") or ""
         tool_input = getattr(action, "tool_input", None)
         log = getattr(action, "log", None)
-        await self.queue.put(
+        thought = str(log) if log else None
+        if thought:
+            self.current_workflow_stage = "planning"
+            self.current_step_id = self._next_step_id()
+            await self._send_event(
+                "agent_thought",
+                {
+                    "thought": thought,
+                    "step_id": self.current_step_id,
+                },
+            )
+        self.current_workflow_stage = "executing"
+        if not self.current_step_id:
+            self.current_step_id = self._next_step_id()
+        await self._send_event(
+            "agent_action",
             {
-                "event": "agent_action",
                 "tool": str(tool),
                 "tool_input": _stringify(tool_input),
                 "log": str(log) if log else None,
-            }
+                "step_id": self.current_step_id,
+            },
         )
 
     async def on_tool_start(self, serialized, input_str, **kwargs):
@@ -163,20 +234,55 @@ class PredictStreamHandler(AsyncCallbackHandler):
             name = serialized.get("name") or serialized.get("tool")
         if not name:
             name = str(serialized)
-        await self.queue.put(
+        if name == "trace_note":
+            self.current_workflow_stage = "planning"
+            if not self.current_step_id:
+                self.current_step_id = self._next_step_id()
+            await self._send_event(
+                "trace_note",
+                {
+                    "note": _stringify(input_str),
+                    "step_id": self.current_step_id,
+                },
+            )
+            return
+        self.current_workflow_stage = "executing"
+        self.current_step_id = self._next_step_id()
+        await self._send_event(
+            "tool_start",
             {
-                "event": "tool_start",
                 "tool": name,
                 "tool_input": _stringify(input_str),
-            }
+                "step_id": self.current_step_id,
+            },
         )
 
     async def on_tool_end(self, output, **kwargs):
-        await self.queue.put(
+        self.current_workflow_stage = "observing"
+        observation = _stringify(output)
+        await self._send_event(
+            "tool_end",
             {
-                "event": "tool_end",
-                "observation": _stringify(output),
-            }
+                "observation": observation,
+                "step_id": self.current_step_id,
+            },
+        )
+        await self._send_event(
+            "agent_observation",
+            {
+                "observation": observation,
+                "step_id": self.current_step_id,
+            },
+        )
+
+    async def on_chain_error(self, error, **kwargs):
+        await self._send_event(
+            "error",
+            {
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "step_id": self.current_step_id,
+            },
         )
 
 
@@ -287,7 +393,20 @@ async def _run_predict(req: PredictRequest, callbacks: list | None = None) -> Pr
 
 @app.post("/api/predict/run", response_model=PredictResponse)
 async def predict(req: PredictRequest) -> PredictResponse:
-    return await _run_predict(req)
+    timeout_s = settings.request_timeout_s + 60.0
+    try:
+        return await asyncio.wait_for(_run_predict(req), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        logger.error(
+            "predict /api/predict/run timeout service=%s lookback_hours=%s timeout_s=%s",
+            req.service_name,
+            req.lookback_hours,
+            timeout_s,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail="预测任务超时，请检查 Prometheus/Loki/LLM 可用性后重试。",
+        )
 
 
 @app.post("/api/predict/run/stream")
