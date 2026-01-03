@@ -21,7 +21,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
                 "当前可观测对象主要包括：user-service、todo-service、ai-service 以及底层节点和 MySQL。"
                 "你接入了两个工具：predict_collect_features（聚合错误日志计数与样本）和 prometheus_query_range（Prometheus /api/v1/query_range）。"
                 "调用 prometheus_query_range 时，禁止自己构造具体日期时间，必须按照以下约定填写 start_iso 和 end_iso："
-                "start_iso 一律写成 'LOOKBACK_{lookback_hours}_HOURS_START'，end_iso 可以任意占位（会被后端忽略），"
+                "start_iso 一律写成 'LOOKBACK_{{lookback_hours}}_HOURS_START'，end_iso 可以任意占位（会被后端忽略），"
                 "其中 lookback_hours 为当前用户给定的回看小时数（例如 1、2、4、6 等）。后端会自动将其转换为“当前时间往前 lookback_hours 小时”的时间窗口，"
                 "严禁使用 2024-05-20 等固定日期或超出当前时间的未来时间。"
                 "在构造 PromQL 时，请优先参考如下指标家族（仅列举常用示例，不能凭空臆造不存在的指标）："
