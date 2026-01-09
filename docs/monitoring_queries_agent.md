@@ -15,7 +15,7 @@
   - 由 Promtail 从 Kubernetes 集群采集
   - 只把 Kubernetes 自带字段作为标签：
     - `namespace`、`app`、`pod`、`container`、`job`、`node_name`、`filename`、`stream`
-  - 日志中形如 `service=user-service`、`level=INFO` 只是普通文本
+  - 日志中形如 `service=user-service`、`event=login`、`user=peter`、`user_id=22`、`todo_id=101`、`level=INFO` 等都只是普通文本字段
 
 当你（Agent）需要生成查询时，应遵守以下规则：
 
@@ -217,6 +217,7 @@ up{service=~"user-service|todo-service|ai-service"} == 0
 - 日志中的业务字段（如 `service=user-service`、`level=INFO`）只能通过文本过滤：
   - 严禁写 `{service="user-service"}` 或 `{service=~"..."}`
   - 必须写成 `{namespace="todo-demo"} |= "service=user-service"`
+  - 其他字段如 `event=...`、`user=...`、`user_id=...`、`todo_id=...` 等，也必须用 `|=` 或 `|~` 进行文本过滤
 
 错误示例（不要使用）：
 
@@ -283,7 +284,7 @@ sum by (app) (
 ```logql
 {namespace="todo-demo"}
   |= "service=user-service"
-  |~ "(?i)login|signin"
+  |~ "(?i)event=login|login|signin"
 ```
 
 #### 待办操作相关日志
@@ -291,7 +292,7 @@ sum by (app) (
 ```logql
 {namespace="todo-demo"}
   |= "service=todo-service"
-  |~ "(?i)create|update|delete|complete"
+  |~ "(?i)event=todo_create|event=todo_update|event=todo_delete|create|update|delete|complete"
 ```
 
 #### AI 对话相关日志
@@ -299,15 +300,33 @@ sum by (app) (
 ```logql
 {namespace="todo-demo"}
   |= "service=ai-service"
-  |~ "(?i)chat|request|response"
+  |~ "(?i)event=ai_chat|chat|request|response"
 ```
 
 #### 某个用户最近 N 分钟的操作行为（跨服务）
 
-在 Todo_List 的日志中，user-service 登录日志里一定会包含用户名（例如 `user=peter`），有些情况下还会额外带上内部用户 ID（例如 `user_id=22`）；todo-service / ai-service 的业务日志通常只包含 `user_id` 而不再重复用户名：
+在 Todo_List 的日志设计规范中（详见 `docs/todolist_logging_design.md`），推荐在关键业务日志中统一使用如下字段：
 
-- user-service 日志行：总是包含 `user=peter`，有时包含 `user_id=22`
-- todo-service / ai-service 日志行：通常只包含 `user_id=22`
+- `service`：服务名，例如 `user-service`、`todo-service`、`ai-service`
+- `event`：事件类型，例如 `login`、`register`、`todo_create`、`todo_update`、`todo_delete`、`ai_chat`、`http_request` 等
+- `user`：用户名，例如 `user=peter`
+- `user_id`：内部用户 ID，例如 `user_id=22`
+- `todo_id`：待办 ID，例如 `todo_id=101`
+- `status`：结果状态，例如 `status=success` 或 `status=failure`
+
+按照该规范落地后，各服务日志的典型形态为：
+
+- user-service 登录成功日志：一定包含 `user=peter`，并推荐同时包含 `user_id=22`：
+  - `service=user-service event=login user=peter user_id=22 status=success`
+- todo-service 业务日志：只包含 `user_id=22` 和 `todo_id=...`，不再重复用户名：
+  - `service=todo-service event=todo_create todo_id=101 user_id=22 ...`
+- ai-service 业务日志：只包含 `user_id=22`：
+  - `service=ai-service event=ai_chat user_id=22 status=success`
+
+在实际环境中，如果某些字段（例如 `user_id`）尚未完全按规范落地，你在查询时要注意区分：
+
+- 如果在 user-service 登录成功日志中能看到 `user_id=...`，可以用它做跨服务关联
+- 如果看不到 `user_id`，只能基于用户名 `user=peter` 给出更保守的结论，并在回答中说明“日志中缺少 user_id 字段，无法完全对齐 todo/ai-service 的行为”
 
 当需要回答“某个用户在最近一段时间做了什么”时，建议按照下面的顺序构造查询：
 
@@ -316,11 +335,12 @@ sum by (app) (
    ```logql
    {namespace="todo-demo"}
      |= "service=user-service"
-     |~ "(?i)login|signin"
+     |~ "(?i)event=login|login|signin"
      |= "user=peter"
    ```
 
-   如果日志行中同时包含 `user_id=22`，可以把该值记为当前用户的 `user_id`；如果没有 `user_id` 字段，也要把这些登录日志视为有效证据，而不能因为缺少 `user_id` 就认为没有该用户相关日志。
+   - 理想情况（日志已按规范改造）：同一行中还会包含 `user_id=22`，可以把该值记为当前用户的 `user_id`
+   - 兼容情况（日志尚未完全改造）：如果没有 `user_id` 字段，也要把这些登录日志视为有效证据，而不能因为缺少 `user_id` 就认为没有该用户相关日志
 
 2. 再使用该 `user_id` 去 todo-service / ai-service 中查找业务操作日志：
 
@@ -343,6 +363,8 @@ sum by (app) (
    - 在 ai-service 中与 AI 助手的对话请求。
 
 如果在 user-service 中能找到该用户的登录记录，但在 todo-service / ai-service 中没有匹配到对应的 `user_id`，应在回答中明确说明“仅在 user-service 找到登录相关日志，暂未看到该用户在其他服务上的业务操作日志”。
+
+如果在当前环境中确实还没有按照规范输出 `user_id` 或 `event` 字段，也要在回答中解释清楚这一限制，而不要假设这些字段一定存在。
 
 ### 3.4 聚合与统计
 
