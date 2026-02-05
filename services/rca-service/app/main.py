@@ -63,6 +63,8 @@ def _start_feishu_ws_client() -> None:
     if not app_id or not app_secret:
         logging.warning("Feishu app_id 或 app_secret 未配置，跳过长连接客户端启动")
         return
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     handler = (
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(_on_im_message)
@@ -74,7 +76,10 @@ def _start_feishu_ws_client() -> None:
         event_handler=handler,
         log_level=lark.LogLevel.INFO,
     )
-    cli.start()
+    try:
+        cli.start()
+    except Exception as exc:
+        logging.exception("Feishu ws client exited: %s", exc)
 
 
 @app.on_event("startup")
