@@ -18,12 +18,22 @@ FEISHU_APP_ID = os.getenv("FEISHU_APP_ID") or ""
 FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET") or ""
 DEFAULT_CHAT_ID = os.getenv("FEISHU_DEFAULT_CHAT_ID") or ""
 
+PROCESSED_MESSAGE_IDS: set[str] = set()
+
 
 def _on_im_message(data: P2ImMessageReceiveV1) -> None:
     event = data.event
     if event is None or event.message is None:
         return
     message = event.message
+    msg_id = getattr(message, "message_id", None)
+    if msg_id:
+        if msg_id in PROCESSED_MESSAGE_IDS:
+            logging.info("duplicate feishu message ignored, message_id=%s", msg_id)
+            return
+        PROCESSED_MESSAGE_IDS.add(msg_id)
+        if len(PROCESSED_MESSAGE_IDS) > 1000:
+            PROCESSED_MESSAGE_IDS.pop()
     chat_id = message.chat_id or DEFAULT_CHAT_ID
     if not chat_id:
         return
@@ -40,7 +50,7 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
     url = f"{RCA_SERVICE_BASE_URL}/feishu/receive"
     payload = {"chat_id": chat_id, "text": text}
     try:
-        with httpx.Client(timeout=60.0) as client:
+        with httpx.Client(timeout=600.0) as client:
             r = client.post(url, json=payload)
         logging.info("forwarded to rca-service, status=%s", r.status_code)
         r.raise_for_status()
