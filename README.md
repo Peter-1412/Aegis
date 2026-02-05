@@ -68,13 +68,12 @@ rca-service 内部关键模块：
 
 详细说明见 [`docs/api.md`](docs/api.md)，这里给出主要接口一览：
 
-| 服务        | 方法 | 路径                     | 说明                            |
-|-------------|------|--------------------------|---------------------------------|
-| rca-service | GET  | `/healthz`               | 健康检查                        |
-| rca-service | POST | `/api/rca/analyze`       | 同步 RCA 分析                   |
-| rca-service | POST | `/api/rca/analyze/stream`| 流式 RCA 分析（NDJSON）         |
-| rca-service | POST | `/feishu/events`         | 飞书事件订阅回调（消息事件）    |
-| rca-service | POST | `/alertmanager/webhook`  | Alertmanager Webhook 回调入口   |
+| 服务        | 方法 | 路径                     | 说明                                      |
+|-------------|------|--------------------------|-------------------------------------------|
+| rca-service | GET  | `/healthz`               | 健康检查                                  |
+| rca-service | POST | `/api/rca/analyze`       | 同步 RCA 分析                             |
+| rca-service | POST | `/api/rca/analyze/stream`| 流式 RCA 分析（NDJSON）                   |
+| rca-service | POST | `/alertmanager/webhook`  | Alertmanager Webhook 回调入口             |
 
 ### 5. 部署说明（Kubernetes）
 
@@ -98,22 +97,23 @@ rca-service 内部关键模块：
    kubectl apply -f k8s/rca-service.yaml
    ```
 
-3. 将 `/feishu/events` 与 `/alertmanager/webhook` 暴露到集群外（例如通过 Ingress 或 API Gateway），用于：
+3. 根据需要暴露 HTTP 接口：
 
-   - 飞书开放平台事件订阅回调
-   - Alertmanager Webhook 回调
+   - 通常仅需在集群内访问 `/alertmanager/webhook`（由 Alertmanager 调用）；
+   - `/api/rca/analyze`、`/api/rca/analyze/stream` 可按需通过 Ingress 或 API Gateway 暴露给其他内部系统。
 
-4. 在 Alertmanager 中配置 Webhook 通知地址为 `/alertmanager/webhook`，并在飞书开发者后台配置事件订阅地址为 `/feishu/events`。
+4. 在 Alertmanager 中配置 Webhook 通知地址为 `/alertmanager/webhook`。
 
 ### 6. 飞书集成说明（概览）
 
 详细步骤见 [`docs/prd.md`](docs/prd.md) 与 [`docs/user-manual.md`](docs/user-manual.md)，这里给出概要流程：
 
 - 在飞书开放平台创建企业自建应用，获取 `app_id` 与 `app_secret`
-- 配置事件订阅，至少开启：
+- 在应用后台开启“长连接事件订阅”能力，并订阅：
   - 机器人收到消息 `im.message.receive_v1`
+- 在 K8s Secret 中配置 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`
+- rca-service 在启动时使用 `lark-oapi` 建立与飞书的长连接，自动接收群聊消息并触发 RCA 分析
 - 将应用添加到对应飞书群组，获取群组 `chat_id` 并填入 `FEISHU_DEFAULT_CHAT_ID`
-- 在服务器防火墙与飞书开放平台中放通出入口 IP（可使用飞书“获取事件出口 IP”接口）
 
 ### 7. 本地开发与调试
 

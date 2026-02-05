@@ -130,63 +130,16 @@
 
 ---
 
-## 5. 飞书事件回调接口
+## 5. 飞书长连接事件处理
 
-### 5.1 URL 校验与消息事件
+rca-service 在启动时会使用 `lark-oapi` 建立与飞书开放平台的长连接，订阅 `im.message.receive_v1` 事件：
 
-- 方法：`POST`
-- 路径：`/feishu/events`
+- 当用户在飞书群中 @ 机器人并发送文本消息时：
+  - SDK 通过长连接收到事件；
+  - rca-service 将消息文本作为 `description`，使用最近 15 分钟时间窗口调用内部 `_run_rca`；
+  - 分析完成后，通过开放平台接口向同一个 `chat_id` 发送结构化文本结果。
 
-该接口同时用于：
-
-- 飞书开放平台 URL 校验（`url_verification`）
-- 机器人消息事件回调（`event_callback`，`im.message.receive_v1`）
-
-#### URL 校验请求示例
-
-```json
-{
-  "type": "url_verification",
-  "token": "your-verification-token",
-  "challenge": "random-string"
-}
-```
-
-#### URL 校验响应示例
-
-```json
-{
-  "challenge": "random-string"
-}
-```
-
-#### 消息事件请求结构（简化）
-
-```json
-{
-  "type": "event_callback",
-  "event": {
-    "type": "im.message.receive_v1",
-    "message": {
-      "chat_id": "oc_xxx",
-      "content": "{\"text\":\"请帮我分析 20:15 的 502 故障\"}"
-    }
-  }
-}
-```
-
-当收到有效的文本消息时，rca-service 会：
-
-1. 把消息文本作为 `description`
-2. 使用最近 15 分钟作为时间窗口
-3. 调用内部 `_run_rca` 完成分析
-4. 将结果以文本形式发送到同一个 `chat_id`
-
-接口返回的 HTTP 响应始终为：
-
-```json
-{ "code": 0, "msg": "ok" }
-```
+该模式下不再暴露 `/feishu/events` HTTP 回调接口，也不需要配置任何公网 IP 或域名。
 
 实际发送消息的错误会记录在服务日志中。
 
@@ -247,4 +200,3 @@ rca-service 行为：
 ```
 
 如果未配置 `FEISHU_DEFAULT_CHAT_ID` 或没有告警，则会返回 `ignored` 状态。
-

@@ -18,7 +18,7 @@ Aegis RCA Agent 运行在 Kubernetes 集群中，通过只读方式消费可观�
 数据流向可概括为两条主线：
 
 1. 告警驱动：Alertmanager → rca-service → Feishu 群消息
-2. 人工提问驱动：Feishu 群消息 → rca-service → Prometheus/Loki/Jaeger → Feishu 回复
+2. 人工提问驱动：Feishu 群消息 →（lark-oapi 长连接网关）→ rca-service → Prometheus/Loki/Jaeger → Feishu 回复
 
 ## 2. 组件说明
 
@@ -65,8 +65,8 @@ Aegis RCA Agent 运行在 Kubernetes 集群中，通过只读方式消费可观�
 ### 3.2 飞书群聊 @机器人 → RCA 分析
 
 1. 运维在告警群内 @ 机器人，并用自然语言描述问题。
-2. 飞书开放平台将 `im.message.receive_v1` 事件 POST 到 `/feishu/events`。
-3. rca-service 从事件中解析 `chat_id` 与文本内容。
+2. 基于 `lark-oapi` 的长连接事件网关从飞书接收 `im.message.receive_v1` 事件。
+3. 事件网关将消息内容转发给 rca-service（调用 `/api/rca/analyze` 或内部封装接口）。
 4. rca-service 以“最近 15 分钟”为时间窗口构造 `RCARequest` 并调用内部 `_run_rca`。
 5. LangChain Agent 基于 Prompt 和工具执行以下步骤：
    - 调用 `trace_note` 记录当前分析计划。
@@ -110,14 +110,12 @@ Aegis RCA Agent 运行在 Kubernetes 集群中，通过只读方式消费可观�
   - `loki` Service：`ClusterIP 10.103.11.30:3100`
   - `jaeger` Service：`NodePort 30686`（UI）、`4317/4318`（OTLP）
 - 命名空间 `aegis`：
-  - `rca-service` Deployment + Service（NodePort 对外暴露）
+  - `rca-service` Deployment + Service（NodePort 对外暴露，仅供内部系统或网关调用）
   - ConfigMap `aegis-config`
   - Secret `aegis-secrets`
 
-通过 Ingress / API Gateway 将 `rca-service` 的以下路径公开到公网或公司内网：
+通过 Ingress / API Gateway 按需将 `rca-service` 的以下路径公开到公司内网：
 
-- `/feishu/events`
-- `/alertmanager/webhook`
-- `/api/rca/analyze`（如需给其他系统调用）
-
+- `/alertmanager/webhook`（供 Alertmanager 调用，也可仅在集群内使用 ClusterIP）
+- `/api/rca/analyze` 与 `/api/rca/analyze/stream`（如需给其他系统或长连接网关调用）
 

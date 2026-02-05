@@ -55,11 +55,10 @@
 ### 3.1 飞书集成
 
 1. 支持企业自建应用模式，使用 `app_id` 和 `app_secret` 获取 `tenant_access_token`。
-2. 支持事件订阅：
+2. 支持事件订阅（长连接模式）：
    - `im.message.receive_v1`：接收群聊中@机器人的消息。
 3. 支持通过 OpenAPI `im/v1/messages` 往指定 `chat_id` 发送文本消息。
-4. 支持 URL 校验流程（`url_verification`）。
-5. 支持配置：
+4. 支持配置：
    - `FEISHU_DEFAULT_CHAT_ID`：默认告警/RCA 结果推送群。
 
 ### 3.2 Alertmanager 集成
@@ -132,4 +131,3 @@
 - 支持多租户、多集群场景（通过标签/命名空间隔离）。
 - 与更多观测后端集成（Tempo / OpenSearch / ClickHouse 等）。
 - 引入规则引擎与知识库，将经验型 SRE 规则结构化沉淀。
-

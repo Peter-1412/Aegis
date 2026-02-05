@@ -104,9 +104,9 @@ Agent 会自动：
 
 如果发现 Agent 返回结果异常或没有反应，可以按以下步骤排查：
 
-1. 在飞书后台检查事件订阅是否正常：
-   - URL 校验是否通过；
-   - `im.message.receive_v1` 是否已勾选；
+1. 检查飞书长连接网关进程是否正常：
+   - 使用 `lark-oapi` 建立长连接的进程是否在运行；
+   - `app_id`、`app_secret`、订阅的 `im.message.receive_v1` 是否配置正确。
 2. 在 Kubernetes 中检查 rca-service 状态：
 
    ```bash
@@ -132,4 +132,3 @@ Aegis RCA Agent 不是用来替代 Grafana / Kibana / Jaeger UI，而是帮助�
 1. 先在飞书里触发一次 RCA 分析，获取候选根因和关键证据；
 2. 再根据结果中的指标名和日志片段，在 Grafana 与 Loki 中做进一步 drill-down；
 3. 对于重要故障，将最终结论同步到内部故障管理系统中。
-

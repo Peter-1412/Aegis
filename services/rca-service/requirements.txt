@@ -8,3 +8,4 @@ langchain-core==0.3.72
 langchain==0.3.27
 langchain-openai==0.2.12
 openai>=1.0.0
+lark-oapi==1.5.2

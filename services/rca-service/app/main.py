@@ -4,15 +4,18 @@ from datetime import datetime, timedelta, timezone
 import asyncio
 import json
 from typing import AsyncIterator
+import threading
 
 import logging
 import uuid
 
+import lark_oapi as lark
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from langchain_core.callbacks import AsyncCallbackHandler
+from lark_oapi.event.callback.model.p2_im_message_receive_v1 import P2ImMessageReceiveV1
 from pydantic import BaseModel
 
 from .feishu_client import feishu_client
@@ -52,6 +55,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 loki = LokiClient(settings.loki_base_url, settings.loki_tenant_id, settings.request_timeout_s)
+
+
+def _start_feishu_ws_client() -> None:
+    app_id = settings.feishu_app_id
+    app_secret = settings.feishu_app_secret
+    if not app_id or not app_secret:
+        logging.warning("Feishu app_id 或 app_secret 未配置，跳过长连接客户端启动")
+        return
+    handler = (
+        lark.EventDispatcherHandler.builder("", "")
+        .register_p2_im_message_receive_v1(_on_im_message)
+        .build()
+    )
+    cli = lark.ws.Client(
+        app_id,
+        app_secret,
+        event_handler=handler,
+        log_level=lark.LogLevel.INFO,
+    )
+    cli.start()
+
+
+@app.on_event("startup")
+async def _on_startup() -> None:
+    global _feishu_loop
+    _feishu_loop = asyncio.get_running_loop()
+    thread = threading.Thread(target=_start_feishu_ws_client, daemon=True)
+    thread.start()
 
 
 @app.get("/healthz")
@@ -107,11 +138,69 @@ def _build_trace(intermediate_steps) -> AgentTrace:
     return AgentTrace(steps=steps)
 
 
-class FeishuEventEnvelope(BaseModel):
-    type: str
-    challenge: str | None = None
-    token: str | None = None
-    event: dict | None = None
+_feishu_loop: asyncio.AbstractEventLoop | None = None
+
+
+async def _handle_feishu_text(chat_id: str, text: str):
+    text = text.strip()
+    if not text:
+        return
+    now = datetime.now(_CST)
+    req = RCARequest(
+        description=text,
+        time_range=TimeRange(start=now - timedelta(minutes=15), end=now),
+        session_id=chat_id,
+    )
+    res = await _run_rca(req)
+    lines: list[str] = []
+    lines.append("【自动RCA分析结果】")
+    lines.append(f"时间范围（CST）：{(now - timedelta(minutes=15)).isoformat()} ~ {now.isoformat()}")
+    lines.append(f"故障描述：{text}")
+    lines.append("")
+    lines.append(f"总结：{res.summary}")
+    if res.ranked_root_causes:
+        lines.append("")
+        lines.append("可能的根因候选：")
+        for c in res.ranked_root_causes[:3]:
+            prob = f"，概率≈{c.probability:.2f}" if c.probability is not None else ""
+            svc = f"（服务：{c.service}）" if c.service else ""
+            lines.append(f"{c.rank}. {c.description}{svc}{prob}")
+    if res.next_actions:
+        lines.append("")
+        lines.append("建议后续操作：")
+        for idx, act in enumerate(res.next_actions, start=1):
+            lines.append(f"{idx}. {act}")
+    text_msg = "\n".join(lines)
+    await feishu_client.send_text_message(chat_id=chat_id, text=text_msg)
+
+
+def _on_im_message(data: P2ImMessageReceiveV1) -> None:
+    event = data.event
+    if event is None or event.message is None:
+        return
+    message = event.message
+    chat_id = message.chat_id or settings.feishu_default_chat_id
+    if not chat_id:
+        return
+    content_raw = message.content or "{}"
+    try:
+        content_obj = json.loads(content_raw)
+    except Exception:
+        content_obj = {}
+    text = str(content_obj.get("text") or "").strip()
+    if not text:
+        return
+    loop = _feishu_loop
+    if loop is None:
+        return
+    fut = asyncio.run_coroutine_threadsafe(_handle_feishu_text(chat_id, text), loop)
+
+    def _log_result(future):
+        exc = future.exception()
+        if exc is not None:
+            logging.exception("Feishu message handler error: %s", exc)
+
+    fut.add_done_callback(_log_result)
 
 
 class Alert(BaseModel):
@@ -359,67 +448,6 @@ async def analyze_stream(req: RCARequest):
                 break
 
     return StreamingResponse(iterator(), media_type="application/x-ndjson")
-
-
-@app.post("/feishu/events")
-async def feishu_events(envelope: FeishuEventEnvelope):
-    if envelope.type == "url_verification":
-        if settings.feishu_verification_token and envelope.token != settings.feishu_verification_token:
-            raise HTTPException(status_code=403, detail="invalid verification token")
-        return {"challenge": envelope.challenge}
-
-    if envelope.type != "event_callback":
-        return {"code": 0, "msg": "ignored"}
-
-    event = envelope.event or {}
-    event_type = event.get("type")
-    if event_type != "im.message.receive_v1":
-        return {"code": 0, "msg": "ignored"}
-
-    message = event.get("message") or {}
-    chat_id = message.get("chat_id") or settings.feishu_default_chat_id
-    if not chat_id:
-        return {"code": 0, "msg": "no chat_id configured"}
-
-    content_raw = message.get("content") or "{}"
-    try:
-        content_obj = json.loads(content_raw)
-    except Exception:
-        content_obj = {}
-    text = str(content_obj.get("text") or "").strip()
-    if not text:
-        return {"code": 0, "msg": "empty text"}
-
-    now = datetime.now(_CST)
-    req = RCARequest(
-        description=text,
-        time_range=TimeRange(start=now - timedelta(minutes=15), end=now),
-        session_id=chat_id,
-    )
-    res = await _run_rca(req)
-
-    lines: list[str] = []
-    lines.append("【自动RCA分析结果】")
-    lines.append(f"时间范围（CST）：{(now - timedelta(minutes=15)).isoformat()} ~ {now.isoformat()}")
-    lines.append(f"故障描述：{text}")
-    lines.append("")
-    lines.append(f"总结：{res.summary}")
-    if res.ranked_root_causes:
-        lines.append("")
-        lines.append("可能的根因候选：")
-        for c in res.ranked_root_causes[:3]:
-            prob = f"，概率≈{c.probability:.2f}" if c.probability is not None else ""
-            svc = f"（服务：{c.service}）" if c.service else ""
-            lines.append(f"{c.rank}. {c.description}{svc}{prob}")
-    if res.next_actions:
-        lines.append("")
-        lines.append("建议后续操作：")
-        for idx, act in enumerate(res.next_actions, start=1):
-            lines.append(f"{idx}. {act}")
-
-    text_msg = "\n".join(lines)
-    await feishu_client.send_text_message(chat_id=chat_id, text=text_msg)
-    return {"code": 0, "msg": "ok"}
 
 
 @app.post("/alertmanager/webhook")
