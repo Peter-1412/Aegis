@@ -10,12 +10,12 @@ import logging
 import uuid
 
 import lark_oapi as lark
+from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from langchain_core.callbacks import AsyncCallbackHandler
-from lark_oapi.event.callback.model.p2_im_message_receive_v1 import P2ImMessageReceiveV1
 from pydantic import BaseModel
 
 from .feishu_client import feishu_client
