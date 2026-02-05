@@ -34,12 +34,15 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
         content_obj = {}
     text = str(content_obj.get("text") or "").strip()
     if not text:
+        logging.info("received empty text, ignore, chat_id=%s", chat_id)
         return
+    logging.info("received feishu message, chat_id=%s, text=%s", chat_id, text)
     url = f"{RCA_SERVICE_BASE_URL}/feishu/receive"
     payload = {"chat_id": chat_id, "text": text}
     try:
         with httpx.Client(timeout=60.0) as client:
             r = client.post(url, json=payload)
+        logging.info("forwarded to rca-service, status=%s", r.status_code)
         r.raise_for_status()
     except Exception as exc:
         logging.exception("forward feishu message failed: %s", exc)

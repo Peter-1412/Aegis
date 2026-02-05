@@ -117,15 +117,25 @@ async def _handle_feishu_text(chat_id: str, text: str):
     if not text:
         return
     now = datetime.now(_CST)
+    logging.info("feishu request received, chat_id=%s, text=%s", chat_id, text)
     req = RCARequest(
         description=text,
-        time_range=TimeRange(start=now - timedelta(minutes=15), end=now),
+        time_range=TimeRange(start=now - timedelta(hours=1), end=now),
         session_id=chat_id,
     )
+    logging.info(
+        "start rca for chat_id=%s, window=%s~%s",
+        chat_id,
+        (now - timedelta(hours=1)).isoformat(),
+        now.isoformat(),
+    )
     res = await _run_rca(req)
+    logging.info(
+        "rca finished, chat_id=%s, summary=%s", chat_id, (res.summary or "")[:200]
+    )
     lines: list[str] = []
     lines.append("【自动RCA分析结果】")
-    lines.append(f"时间范围（CST）：{(now - timedelta(minutes=15)).isoformat()} ~ {now.isoformat()}")
+    lines.append(f"时间范围（CST）：{(now - timedelta(hours=1)).isoformat()} ~ {now.isoformat()}")
     lines.append(f"故障描述：{text}")
     lines.append("")
     lines.append(f"总结：{res.summary}")
@@ -142,6 +152,7 @@ async def _handle_feishu_text(chat_id: str, text: str):
         for idx, act in enumerate(res.next_actions, start=1):
             lines.append(f"{idx}. {act}")
     text_msg = "\n".join(lines)
+    logging.info("sending feishu message, chat_id=%s, length=%s", chat_id, len(text_msg))
     await feishu_client.send_text_message(chat_id=chat_id, text=text_msg)
 
 
@@ -407,6 +418,12 @@ async def alertmanager_webhook(payload: AlertmanagerWebhook):
     alerts = payload.alerts or []
     if not alerts:
         return {"status": "ignored", "reason": "no alerts"}
+
+    logging.info(
+        "alertmanager webhook received, status=%s, alert_count=%s",
+        payload.status,
+        len(alerts),
+    )
 
     lines: list[str] = []
     lines.append("@所有人")
