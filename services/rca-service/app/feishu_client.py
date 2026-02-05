@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+import json
 
 import httpx
 
@@ -47,13 +48,14 @@ class FeishuClient:
         body = {
             "receive_id": chat_id,
             "msg_type": "text",
-            "content": {"text": text},
+            "content": json.dumps({"text": text}, ensure_ascii=False),
         }
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(url, params=params, json=body, headers=headers)
-        r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if r.status_code >= 400 or data.get("code", 0) != 0:
+            raise RuntimeError(f"发送飞书消息失败: http={r.status_code}, code={data.get('code')}, msg={data.get('msg')}")
+        return data
 
 
 feishu_client = FeishuClient()
-

@@ -4,13 +4,10 @@ from datetime import datetime, timedelta, timezone
 import asyncio
 import json
 from typing import AsyncIterator
-import threading
 
 import logging
 import uuid
 
-import lark_oapi as lark
-from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -55,39 +52,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 loki = LokiClient(settings.loki_base_url, settings.loki_tenant_id, settings.request_timeout_s)
-
-
-def _start_feishu_ws_client() -> None:
-    app_id = settings.feishu_app_id
-    app_secret = settings.feishu_app_secret
-    if not app_id or not app_secret:
-        logging.warning("Feishu app_id 或 app_secret 未配置，跳过长连接客户端启动")
-        return
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    handler = (
-        lark.EventDispatcherHandler.builder("", "")
-        .register_p2_im_message_receive_v1(_on_im_message)
-        .build()
-    )
-    cli = lark.ws.Client(
-        app_id,
-        app_secret,
-        event_handler=handler,
-        log_level=lark.LogLevel.INFO,
-    )
-    try:
-        cli.start()
-    except Exception as exc:
-        logging.exception("Feishu ws client exited: %s", exc)
-
-
-@app.on_event("startup")
-async def _on_startup() -> None:
-    global _feishu_loop
-    _feishu_loop = asyncio.get_running_loop()
-    thread = threading.Thread(target=_start_feishu_ws_client, daemon=True)
-    thread.start()
 
 
 @app.get("/healthz")
@@ -143,7 +107,9 @@ def _build_trace(intermediate_steps) -> AgentTrace:
     return AgentTrace(steps=steps)
 
 
-_feishu_loop: asyncio.AbstractEventLoop | None = None
+class FeishuIncoming(BaseModel):
+    chat_id: str
+    text: str
 
 
 async def _handle_feishu_text(chat_id: str, text: str):
@@ -179,33 +145,10 @@ async def _handle_feishu_text(chat_id: str, text: str):
     await feishu_client.send_text_message(chat_id=chat_id, text=text_msg)
 
 
-def _on_im_message(data: P2ImMessageReceiveV1) -> None:
-    event = data.event
-    if event is None or event.message is None:
-        return
-    message = event.message
-    chat_id = message.chat_id or settings.feishu_default_chat_id
-    if not chat_id:
-        return
-    content_raw = message.content or "{}"
-    try:
-        content_obj = json.loads(content_raw)
-    except Exception:
-        content_obj = {}
-    text = str(content_obj.get("text") or "").strip()
-    if not text:
-        return
-    loop = _feishu_loop
-    if loop is None:
-        return
-    fut = asyncio.run_coroutine_threadsafe(_handle_feishu_text(chat_id, text), loop)
-
-    def _log_result(future):
-        exc = future.exception()
-        if exc is not None:
-            logging.exception("Feishu message handler error: %s", exc)
-
-    fut.add_done_callback(_log_result)
+@app.post("/feishu/receive")
+async def feishu_receive(payload: FeishuIncoming) -> dict[str, str]:
+    await _handle_feishu_text(payload.chat_id, payload.text)
+    return {"status": "ok"}
 
 
 class Alert(BaseModel):
