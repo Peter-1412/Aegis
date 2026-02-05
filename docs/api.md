@@ -1,317 +1,250 @@
-# Aegis 接口文档
+# 接口文档 / API Reference
 
-> 面向前端与集成方，描述 Aegis 三个后端微服务的 HTTP 接口。
+> 本文档只覆盖当前仍在使用的 **RCA Service** 能力，所有接口均为只读，不会对集群或业务产生任何修改。
 
----
+## 1. 基础信息
 
-## 1. 通用约定
-
-- 协议：HTTP/HTTPS
-- 编码：UTF-8
-- 数据格式：JSON
-- 认证：当前示例未启用认证，可在网关层或服务层扩展
-- 错误码：
-  - HTTP 2xx：请求成功
-  - HTTP 4xx：参数错误或调用方式错误
-  - HTTP 5xx：服务内部错误（包括下游 Loki/Prometheus/LLM 等异常）
-
-时间字段统一使用 ISO8601 字符串，例如：`2025-01-01T08:00:00+08:00`。
+- 服务名称：`rca-service`
+- 技术栈：FastAPI + LangChain
+- 默认监听端口：`8002`
+- 所有接口返回 JSON，除 `/api/rca/analyze/stream` 为 `application/x-ndjson`
 
 ---
 
-## 2. ChatOps Service
-
-服务地址示例：
-
-- 本地开发：`http://localhost:8001`
-- Kubernetes 集群内：参考 `k8s/chatops-service.yaml`
-
-### 2.1 健康检查
+## 2. 健康检查
 
 - 方法：`GET`
 - 路径：`/healthz`
 
-**请求示例：**
-
-```http
-GET /healthz HTTP/1.1
-Host: chatops-service
-```
-
-**响应示例：**
+### 响应示例
 
 ```json
 {
   "status": "ok",
-  "service": "chatops-service"
+  "service": "rca-service"
 }
 ```
 
 ---
 
-### 2.2 ChatOps 运维问答
+## 3. 同步 RCA 分析接口
 
 - 方法：`POST`
-- 路径：`/api/chatops/query`
+- 路径：`/api/rca/analyze`
+- 说明：一次性返回 RCA 总结、按概率排序的根因候选列表，以及后续建议
 
-#### 2.2.1 请求体
+### 请求体
 
 ```json
 {
-  "question": "最近 30 分钟 ai-service 有没有 5xx 错误峰值？",
+  "description": "20:15 开始用户反馈任务列表页面访问很慢，部分请求 502。",
   "time_range": {
-    "start": "2025-01-01T08:00:00+08:00",
-    "end": "2025-01-01T08:30:00+08:00",
-    "last_minutes": null
+    "start": "2025-01-15T20:00:00+08:00",
+    "end": "2025-01-15T20:30:00+08:00"
   },
   "session_id": "optional-session-id"
 }
 ```
 
-字段说明：
+- `description`：故障描述，中文自然语言，必填。
+- `time_range.start`：开始时间（ISO8601），建议使用 CST（UTC+8）。
+- `time_range.end`：结束时间（ISO8601），必须大于 `start`。
+- `session_id`：会话标识，用于在多轮对话中保留上下文，可选。
 
-- `question`（string，必填）：运维问题（中文或英文均可），长度 1~2000。
-- `time_range`（object，可选）：
-  - `start` / `end`：时间范围（任一为 null 则视为未指定）。
-  - `last_minutes`：最近 N 分钟（1~1440），与 `start/end` 互斥。
-- `session_id`（string，可选）：会话 ID，相同 ID 的请求会共享对话历史。
-
-若 `time_range` 为 null 或缺失，则默认使用“当前时间往前 30 分钟”。
-
-#### 2.2.2 响应体
+### 响应体
 
 ```json
 {
-  "answer": "最近 30 分钟 ai-service 没有明显的 5xx 峰值，错误率始终低于 1%。",
-  "used_logql": "{namespace=\"todo-demo\", app=\"ai-service\"} |~ \"(?i)error|exception|failed\"",
-  "start": "2025-01-01T00:00:00+00:00",
-  "end": "2025-01-01T00:30:00+00:00",
+  "summary": "本次故障主要表现为 todo-service 在 20:10~20:20 突然出现 5xx 峰值和延迟抖动，疑似下游 MySQL 短暂不可用。",
+  "ranked_root_causes": [
+    {
+      "rank": 1,
+      "service": "todo-service",
+      "probability": 0.78,
+      "description": "todo-service 访问数据库出现大量连接超时，导致接口 5xx 和请求排队。",
+      "key_indicators": [
+        "todo-service http_requests_total 5xx 在 20:12~20:18 明显升高",
+        "对应时间段 http_request_duration_seconds P95 接近 3s"
+      ],
+      "key_logs": [
+        "2025-01-15T12:13:05Z [app=todo-service] ... connect to mysql timeout ...",
+        "2025-01-15T12:13:08Z [app=todo-service] ... Deadlock found when trying to get lock ..."
+      ]
+    }
+  ],
+  "next_actions": [
+    "在 Grafana 中进一步放大 todo-service 相关面板，确认是否存在资源瓶颈或连接池耗尽。",
+    "检查数据库慢查询与锁等待情况，评估是否需要优化索引或拆分热点表。"
+  ],
   "trace": {
     "steps": [
       {
         "index": 0,
         "tool": "trace_note",
-        "tool_input": "计划先查看 ai-service 最近 30 分钟的错误率和 5xx 日志。",
-        "observation": "计划已记录。",
+        "tool_input": "计划先查看 todo-service 的错误率和延迟情况。",
+        "observation": null,
         "log": null
+      }
+    ]
+  }
+}
+```
+
+字段说明：
+
+- `summary`：整体中文总结，面向 SRE/运维工程师。
+- `ranked_root_causes`：根因候选列表，按 `rank` 从 1 递增排序。
+  - `rank`：排序序号，1 表示最可能的根因。
+  - `service`：最相关的服务名，可能为空（无法定位到单一服务）。
+  - `probability`：主观概率，0.0~1.0 之间，可为空。
+  - `description`：根因简要描述。
+  - `key_indicators`：用于支持结论的关键指标结论列表。
+  - `key_logs`：关键日志或调用链证据片段。
+- `next_actions`：后续建议操作列表，按优先级排序。
+- `trace`：Agent 工具调用轨迹，便于审计与故障回放。
+
+---
+
+## 4. 流式 RCA 分析接口
+
+- 方法：`POST`
+- 路径：`/api/rca/analyze/stream`
+- 返回类型：`application/x-ndjson`
+
+该接口与 `/api/rca/analyze` 请求体完全一致，但响应为多行 NDJSON，每行一个 JSON 对象，便于前端实时展示 Agent 思考过程。
+
+### 响应事件类型
+
+- `start`：分析开始事件
+- `llm_start` / `llm_token` / `llm_end`：LLM 调用过程
+- `agent_thought`：Agent 思考过程（规划阶段）
+- `agent_action`：执行某个工具
+- `trace_note`：Agent 填写的计划记录
+- `tool_start` / `tool_end`：具体工具调用前后
+- `agent_observation`：Agent 对工具返回结果的观察
+- `error`：流程中发生错误
+- `final`：最终 RCA 结果（结构同 `/api/rca/analyze`，附加事件字段）
+- `end`：整个流式会话结束
+
+客户端只需逐行读取并解析 JSON，根据 `event` 字段进行 UI 更新。
+
+---
+
+## 5. 飞书事件回调接口
+
+### 5.1 URL 校验与消息事件
+
+- 方法：`POST`
+- 路径：`/feishu/events`
+
+该接口同时用于：
+
+- 飞书开放平台 URL 校验（`url_verification`）
+- 机器人消息事件回调（`event_callback`，`im.message.receive_v1`）
+
+#### URL 校验请求示例
+
+```json
+{
+  "type": "url_verification",
+  "token": "your-verification-token",
+  "challenge": "random-string"
+}
+```
+
+#### URL 校验响应示例
+
+```json
+{
+  "challenge": "random-string"
+}
+```
+
+#### 消息事件请求结构（简化）
+
+```json
+{
+  "type": "event_callback",
+  "event": {
+    "type": "im.message.receive_v1",
+    "message": {
+      "chat_id": "oc_xxx",
+      "content": "{\"text\":\"请帮我分析 20:15 的 502 故障\"}"
+    }
+  }
+}
+```
+
+当收到有效的文本消息时，rca-service 会：
+
+1. 把消息文本作为 `description`
+2. 使用最近 15 分钟作为时间窗口
+3. 调用内部 `_run_rca` 完成分析
+4. 将结果以文本形式发送到同一个 `chat_id`
+
+接口返回的 HTTP 响应始终为：
+
+```json
+{ "code": 0, "msg": "ok" }
+```
+
+实际发送消息的错误会记录在服务日志中。
+
+---
+
+## 6. Alertmanager Webhook 接口
+
+- 方法：`POST`
+- 路径：`/alertmanager/webhook`
+
+Alertmanager 配置示例（仅片段）：
+
+```yaml
+receivers:
+  - name: "aegis-rca"
+    webhook_configs:
+      - url: "http://aegis-rca-service.example.com/alertmanager/webhook"
+```
+
+### 请求体结构（与标准 Alertmanager Webhook 一致，示意）
+
+```json
+{
+  "status": "firing",
+  "receiver": "aegis-rca",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "KubernetesPodCrashLooping",
+        "severity": "critical",
+        "instance": "todo-service-7c9f7d44bb-p2x7b"
       },
-      {
-        "index": 1,
-        "tool": "prometheus_query_range",
-        "tool_input": "{...}",
-        "observation": "{...}",
-        "log": null
-      }
-    ]
-  }
+      "annotations": {
+        "summary": "todo-service pod is restarting too frequently"
+      },
+      "startsAt": "2025-01-15T12:10:00Z",
+      "endsAt": "0001-01-01T00:00:00Z"
+    }
+  ]
 }
 ```
 
-字段说明：
+rca-service 行为：
 
-- `answer`（string）：Agent 的最终回答（中文）。
-- `used_logql`（string，可空）：本轮分析中实际使用的关键 LogQL（便于前端跳转到日志平台）。
-- `start` / `end`（datetime，可空）：本次分析使用的时间范围（统一为 UTC）。
-- `trace`（object，可空）：Agent 工具调用轨迹，便于调试和回放。
+- 将所有告警汇总成一条飞书文本消息
+- 自动在消息开头加入 `@所有人` 提示
+- 按序列列出每条告警的名称、严重级别、实例与摘要
 
----
-
-## 3. RCA Service
-
-服务地址示例：
-
-- 本地开发：`http://localhost:8002`
-
-### 3.1 健康检查
-
-- 方法：`GET`
-- 路径：`/healthz`
-
-响应格式同 ChatOps。
-
----
-
-### 3.2 根因分析
-
-- 方法：`POST`
-- 路径：`/api/rca/analyze`
-
-#### 3.2.1 请求体
+### 响应示例
 
 ```json
 {
-  "description": "用户反馈登录失败率在 10:00~10:15 明显升高，主要涉及 user-service。",
-  "time_range": {
-    "start": "2025-01-01T10:00:00+08:00",
-    "end": "2025-01-01T10:15:00+08:00"
-  },
-  "session_id": "incident-2025-01-01-1"
+  "status": "ok",
+  "sent_to": "oc_xxx",
+  "alert_count": 3
 }
 ```
 
-字段说明：
-
-- `description`（string，必填）：故障描述，1~4000 字符。
-- `time_range`（object，必填）：
-  - `start` / `end`：分析时间窗口（CST 或带时区的 ISO8601）。
-- `session_id`（string，可选）：会话 ID。
-
-#### 3.2.2 响应体
-
-```json
-{
-  "summary": "在 10:00~10:15 期间，user-service 的登录接口 401/403 错误率显著升高，根因是近期发布引入的权限校验规则错误。",
-  "suspected_service": "user-service",
-  "root_cause": "登录流程中对 token 的校验逻辑配置错误，导致合法用户被误判为未授权。",
-  "evidence": [
-    "Prometheus: user_login_failure_total 在 10:05 左右出现阶跃式上升，错误率从 <1% 升至约 15%。",
-    "Loki: {namespace=\"todo-demo\", app=\"user-service\"} 日志中大量出现 \"401 Unauthorized\" 与 \"authentication failed\"。"
-  ],
-  "suggested_actions": [
-    "回滚 user-service 最近一次变更中与权限校验相关的配置或代码。",
-    "增加登录失败原因的结构化指标，用于以后更细粒度的监控。"
-  ],
-  "trace": {
-    "steps": [
-      {
-        "index": 0,
-        "tool": "trace_note",
-        "tool_input": "计划结合 Prometheus 指标与 user-service 错误日志做 RCA。",
-        "observation": "计划已记录。",
-        "log": null
-      }
-    ]
-  }
-}
-```
-
-字段说明：
-
-- `summary`（string）：中文自然语言总结。
-- `suspected_service`（string，可空）：最可疑的服务名。
-- `root_cause`（string，可空）：简要根因描述。
-- `evidence`（string[]）：关键证据点，通常引用指标与日志。
-- `suggested_actions`（string[]）：可执行的修复或排查建议。
-- `trace`：Agent 工具调用轨迹。
-
----
-
-## 4. Predict Service
-
-服务地址示例：
-
-- 本地开发：`http://localhost:8003`
-
-### 4.1 健康检查
-
-- 方法：`GET`
-- 路径：`/healthz`
-
-响应格式同前。
-
----
-
-### 4.2 风险预测
-
-- 方法：`POST`
-- 路径：`/api/predict/run`
-
-#### 4.2.1 请求体
-
-```json
-{
-  "service_name": "todo-service",
-  "lookback_hours": 24,
-  "session_id": "predict-2025-01-01-1"
-}
-```
-
-字段说明：
-
-- `service_name`（string，必填）：待评估的服务名，例如 `user-service`、`todo-service`、`ai-service`。
-- `lookback_hours`（int，可选，默认 24）：回看小时数，范围 1~720。
-- `session_id`（string，可选）：会话 ID。
-
-#### 4.2.2 响应体
-
-```json
-{
-  "service_name": "todo-service",
-  "risk_score": 0.63,
-  "risk_level": "medium",
-  "likely_failures": [
-    "todo-service 写数据库时偶发超时，可能导致创建/更新卡顿。",
-    "下游 ai-service 调用失败导致部分待办智能推荐功能不可用。"
-  ],
-  "explanation": "过去 24 小时 todo-service 相关错误日志数量在最近 2 小时有明显上升，且延迟指标尾部有所抬升，但整体错误率仍在可接受范围内，因此评估为中等风险。",
-  "trace": {
-    "steps": [
-      {
-        "index": 0,
-        "tool": "trace_note",
-        "tool_input": "计划查看 todo-service 过去 24 小时错误率与延迟趋势，并拉取错误日志样本。",
-        "observation": "计划已记录。",
-        "log": null
-      }
-    ]
-  }
-}
-```
-
-字段说明：
-
-- `service_name`（string）：对应请求参数。
-- `risk_score`（float，0.0~1.0）：未来一段时间（约 1~6 小时）发生严重故障的主观风险分。
-- `risk_level`（string）：风险等级（如 `low` / `medium` / `high`），与 `risk_score` 对应。
-- `likely_failures`（string[]）：未来可能出现的故障类型描述。
-- `explanation`（string）：一段面向工程师的中文解释，说明风险判断依据。
-- `trace`：Agent 工具调用轨迹。
-
----
-
-## 5. 错误处理约定
-
-### 5.1 HTTP 状态码
-
-- `400 Bad Request`：请求参数不合法，例如时间范围 `end <= start`。
-- `500 Internal Server Error`：内部未捕获异常或下游严重错误。
-
-### 5.2 工具级错误返回
-
-在部分工具（如 `prometheus_query_range`）中，为避免直接抛出异常导致接口 500，会以结构化对象形式返回错误：
-
-```json
-{
-  "error": "invalid_datetime",
-  "message": "Invalid isoformat string: '...'",
-  "promql": "...",
-  "start_raw": "...",
-  "end_raw": "..."
-}
-```
-
-或：
-
-```json
-{
-  "error": "prometheus_request_failed",
-  "message": "HTTP 500 ...",
-  "promql": "...",
-  "start": "...",
-  "end": "...",
-  "step": "60s"
-}
-```
-
-这些对象会出现在 `trace.steps[*].observation` 中，由大模型决定如何向用户解释。
-
----
-
-## 6. 接入建议
-
-- 建议通过统一的 API 网关对三个服务进行汇聚与鉴权。
-- 若在多集群场景下使用，可在请求头或 Query 参数中增加“集群标识”，由网关路由到不同的 Aegis 实例。
-- 对故障工单系统或告警平台，可通过：
-  - 调用 RCA 接口为告警事件生成一份根因分析报告；
-  - 调用 Predict 接口定期生成服务风险报表。
+如果未配置 `FEISHU_DEFAULT_CHAT_ID` 或没有告警，则会返回 `ignored` 状态。
 

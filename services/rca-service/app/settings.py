@@ -6,19 +6,25 @@ class Settings(BaseSettings):
 
     service_name: str = "rca-service"
 
-    loki_base_url: str = "http://loki-loki-distributed-query-frontend.observability:3100"
+    loki_base_url: str = "http://loki.monitoring.svc.cluster.local:3100"
     loki_tenant_id: str | None = None
     loki_service_label_key: str = "app"
     loki_selector_template: str = '{{{label_key}="{service}"}}'
-    prometheus_base_url: str = "http://prometheus-server.observability.svc.cluster.local:80"
+    prometheus_base_url: str = "http://prometheus.monitoring.svc.cluster.local:9090"
+    jaeger_base_url: str | None = "http://jaeger.monitoring.svc.cluster.local:16686"
 
     request_timeout_s: float = 60.0
     per_service_log_limit: int = 200
     max_total_evidence_lines: int = 200
 
-    llm_model: str = "doubao-seed-1-6-251015"
+    llm_model: str = "doubao-seed-1-8-251228"
     ark_api_key: str | None = None
     ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+
+    feishu_app_id: str | None = None
+    feishu_app_secret: str | None = None
+    feishu_verification_token: str | None = None
+    feishu_default_chat_id: str | None = None
 
 
 settings = Settings()

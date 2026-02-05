@@ -28,18 +28,23 @@ class RCARequest(BaseModel):
     session_id: str | None = Field(default=None, max_length=200)
 
 
-class RCAResponse(BaseModel):
-    summary: str
-    suspected_service: str | None = None
-    root_cause: str | None = None
-    evidence: list[str] = []
-    suggested_actions: list[str] = []
-    trace: AgentTrace | None = None
+class RootCauseCandidate(BaseModel):
+    rank: int = Field(ge=1, le=10)
+    service: str | None = None
+    probability: float | None = Field(default=None, ge=0.0, le=1.0)
+    description: str
+    key_indicators: list[str] = []
+    key_logs: list[str] = []
 
 
 class RCAOutput(BaseModel):
     summary: str
-    suspected_service: str | None = None
-    root_cause: str | None = None
-    evidence: list[str] = []
-    suggested_actions: list[str] = []
+    ranked_root_causes: list[RootCauseCandidate] = []
+    next_actions: list[str] = []
+
+
+class RCAResponse(BaseModel):
+    summary: str
+    ranked_root_causes: list[RootCauseCandidate] = []
+    next_actions: list[str] = []
+    trace: AgentTrace | None = None

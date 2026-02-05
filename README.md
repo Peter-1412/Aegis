@@ -1,188 +1,84 @@
 <div align="center">
 
-# Aegis —— Todo_List 项目的智能运维助手
+# Aegis RCA Agent
 
-面向 SRE / 运维工程师的 AI 运维平台，基于 Prometheus + Loki + 大模型，实现
-即时运维问答（ChatOps）、故障根因分析（RCA）与故障风险预测（Predict）。
+面向 Kubernetes 集群的智能根因分析 Agent，支持与飞书机器人集成。
+
+An enterprise-grade RCA agent for Kubernetes, integrated with Feishu Bot.
+
+[简体中文](#aegis-rca-agent) | [English](#english-overview)
 
 </div>
 
 ---
 
-## 1. 项目简介
+## Aegis RCA Agent
 
-Aegis 是一个为 Kubernetes 上的 Todo_List 应用量身打造的智能运维助手，核心目标：
+### 1. 项目简介
 
-- 只依赖 **Prometheus 指标** 与 **Loki 日志**，不侵入业务代码逻辑
-- 通过大模型代理（Agent）自动调用监控数据源，完成排查与分析
-- 为运维工程师提供统一的 Web 界面，一站式使用 ChatOps / RCA / 预测能力
+Aegis 现聚焦于一个能力：**RCA（Root Cause Analysis）根因故障定位**。
 
-当前支持的三大核心能力：
+Agent 部署在你的 Kubernetes 集群中，通过只读方式接入：
 
-1. **ChatOps**：自然语言提问（如“最近 30 分钟 ai-service 是否有 5xx 峰值？”），
-   Agent 自动生成 PromQL / LogQL 查询并综合给出结论与操作建议。
-2. **RCA（Root Cause Analysis）**：针对一次已发生的故障，收集多服务错误日志和指标，
-   输出结构化的根因分析报告及可执行的修复建议。
-3. **Predict**：结合历史错误日志与关键指标，评估某服务未来一段时间内的故障风险及可能故障类型。
+- Prometheus（指标）
+- Loki + Promtail（日志）
+- Jaeger（分布式调用链）
+- Alertmanager（告警 Webhook，可选）
+- 飞书机器人（作为 Chat 前端）
 
-监控目标系统为：
+核心目标：
 
-- `d:\Code\Python_Study\Todo_List` 项目（后文简称 Todo_List），该项目已接入 Prometheus 与 Loki。
+- 当 Alertmanager 产生告警时，Agent 自动在飞书告警群内 @ 运维同学，汇总关键告警信息。
+- 当运维在群内 @ 机器人并描述故障现象时，Agent 自动调用 Prometheus / Loki / Jaeger 工具完成一次 RCA，并在群内给出按概率排序的根因候选列表及后续排查建议。
+- Agent 始终以只读身份工作，**绝不执行任何变更操作**。
 
----
+### 2. 功能特性
 
-## 2. 主要特性
+- 多源观测数据融合：指标 + 日志 + 调用链
+- LangChain Agent + 工具编排，自动选择合适的查询策略
+- 根因候选结果按主观概率排序，给出关键指标与日志证据
+- 与飞书机器人深度集成：
+  - 接收 Alertmanager Webhook，将告警转发至群组并 @所有人
+  - 接收群聊中的手工 RCA 请求，自动发起分析并回复结构化结论
+- Kubernetes 原生部署，支持 NodePort/Ingress 暴露 HTTP 接口
 
-- 🔍 **多源观测数据融合**
-  - 指标：Prometheus（HTTP、业务、资源、MySQL、节点等）
-  - 日志：Loki（来自 Promtail 收集的 Kubernetes 日志）
-
-- 🧠 **LLM 驱动的智能 Agent**
-  - 基于 LangChain Agent + 工具（Tools）系统
-  - 自动规划 PromQL / LogQL 查询、执行调用、解释结果
-  - 保留每一步工具调用轨迹，方便回溯与审计
-
-- 🧭 **主题化三大服务**
-  - ChatOps Service：日常运维问答
-  - RCA Service：面向事故的根因分析
-  - Predict Service：面向未来的风险研判
-
-- 💻 **统一前端控制台**
-  - 基于 React + Vite 实现
-  - 提供 ChatOps / RCA / Predict 三个页面
-  - 可查看 Agent 生成的 LogQL / 工具调用轨迹
-
-- ☁️ **Kubernetes 原生部署**
-  - 提供完整的 `k8s/` 部署清单（Namespace、ConfigMap、Secret、三套后端服务和前端）
-  - 默认对接集群内的 Loki 与 Prometheus。
-
----
-
-## 3. 目录结构
+### 3. 目录结构
 
 ```text
 Aegis/
-├── frontend/                 # 前端 Web 控制台（React + Vite）
 ├── services/
-│   ├── chatops-service/      # ChatOps 微服务（FastAPI + LangChain Agent）
-│   ├── rca-service/          # RCA 微服务
-│   └── predict-service/      # Predict 微服务
-├── k8s/                      # Kubernetes 部署清单
+│   └── rca-service/          RCA 微服务（FastAPI + LangChain Agent）
+├── k8s/                      Kubernetes 部署清单
 │   ├── namespace.yaml
-│   ├── configmap.yaml
-│   ├── secret.yaml
-│   ├── chatops-service.yaml
-│   ├── rca-service.yaml
-│   ├── predict-service.yaml
-│   └── frontend.yaml
-└── docs/                     # 文档（接口、PRD、架构、迭代、使用手册等）
+│   ├── configmap.yaml        只读访问配置（Loki/Prometheus/Jaeger/Feishu）
+│   ├── secret.yaml           LLM 与飞书密钥（需自行填写）
+│   └── rca-service.yaml      RCA Service 部署与 Service
+└── docs/                     文档（接口、架构、PRD 等）
 ```
 
-各服务内部结构高度一致：
+rca-service 内部关键模块：
 
-- `app/main.py`：FastAPI 入口与 HTTP 接口定义
-- `app/agent/executor.py`：构造 LangChain AgentExecutor 与系统 Prompt
-- `app/tools/`：各个工具（Loki / Prometheus / 业务工具）
-- `app/models.py`：请求 / 响应 / 中间结构模型
-- `app/memory/`：会话记忆（基于 ConversationBufferMemory）
-- `app/settings.py`：配置（Loki / Prometheus / LLM / 业务参数）
+- app/main.py：FastAPI 入口、HTTP 接口、飞书/Alertmanager 集成
+- app/agent/executor.py：LangChain AgentExecutor 与系统 Prompt
+- app/tools/：Prometheus/Loki/Jaeger/trace_note 等工具
+- app/models.py：RCA 请求 / 响应及根因候选数据结构
+- app/settings.py：配置（可通过环境变量/K8s ConfigMap 注入）
 
----
+### 4. 接口概览
 
-## 4. 组件说明
+详细说明见 [`docs/api.md`](docs/api.md)，这里给出主要接口一览：
 
-### 4.1 前端（frontend）
+| 服务        | 方法 | 路径                     | 说明                            |
+|-------------|------|--------------------------|---------------------------------|
+| rca-service | GET  | `/healthz`               | 健康检查                        |
+| rca-service | POST | `/api/rca/analyze`       | 同步 RCA 分析                   |
+| rca-service | POST | `/api/rca/analyze/stream`| 流式 RCA 分析（NDJSON）         |
+| rca-service | POST | `/feishu/events`         | 飞书事件订阅回调（消息事件）    |
+| rca-service | POST | `/alertmanager/webhook`  | Alertmanager Webhook 回调入口   |
 
-- 技术栈：React + Vite
-- 主要页面：
-  - `ChatOpsPage.jsx`：ChatOps 交互页面
-  - `RCAPage.jsx`：根因分析界面
-  - `PredictPage.jsx`：风险预测界面
-- 通过 `frontend/src/api.js` 与后端三个服务进行交互。
+### 5. 部署说明（Kubernetes）
 
-### 4.2 ChatOps Service
-
-- 技术栈：FastAPI + LangChain Agent
-- 核心文件：`services/chatops-service/app/`
-- 主要接口：
-  - `GET /healthz`：健康检查
-  - `POST /api/chatops/query`：运维问答入口
-- Agent 工具：
-  - `trace_note`：记录本轮计划与原因
-  - `loki_query_range_lines`：按时间范围查询 Loki 日志行
-  - `prometheus_query_range`：查询 Prometheus 指标时间序列
-
-### 4.3 RCA Service
-
-- 技术栈：FastAPI + LangChain Agent
-- 核心文件：`services/rca-service/app/`
-- 主要接口：
-  - `GET /healthz`
-  - `POST /api/rca/analyze`：根因分析入口
-- Agent 工具：
-  - `trace_note`
-  - `rca_collect_evidence`：批量收集错误/异常日志证据
-  - `prometheus_query_range`
-
-### 4.4 Predict Service
-
-- 技术栈：FastAPI + LangChain Agent
-- 核心文件：`services/predict-service/app/`
-- 主要接口：
-  - `GET /healthz`
-  - `POST /api/predict/run`：风险预测入口
-- Agent 工具：
-  - `trace_note`
-  - `predict_collect_features`：为预测聚合错误日志计数序列与日志样本
-  - `prometheus_query_range`
-
----
-
-## 5. 快速开始
-
-### 5.1 先决条件
-
-- 已部署的 Kubernetes 集群，并且：
-  - 已安装 Loki（及 Promtail）并采集 Todo_List 项目的日志
-  - 已安装 Prometheus，并采集 Todo_List 服务、节点、MySQL 等指标
-- 部署 Todo_List 项目，并确保：
-  - 指标按 `docs/monitoring_queries_agent.md` 中约定暴露
-  - 日志包含必要的业务字段（如 `service=...`）
-- 可用的 LLM 接入（当前示例为火山方舟 Ark 模型）
-
-### 5.2 本地构建与运行（示意）
-
-1. 安装后端服务依赖（以 ChatOps 为例）：
-
-   ```bash
-   cd services/chatops-service
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload --port 8001
-   ```
-
-2. 启动其它服务：
-
-   ```bash
-   cd services/rca-service
-   uvicorn app.main:app --reload --port 8002
-
-   cd services/predict-service
-   uvicorn app.main:app --reload --port 8003
-   ```
-
-3. 启动前端：
-
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-
-> 具体端口、环境变量、Loki/Prometheus 地址可通过 `settings.py` 与 `k8s/configmap.yaml` 调整。
-
-### 5.3 Kubernetes 部署
-
-1. 创建命名空间与配置：
+1. 创建命名空间与基础配置：
 
    ```bash
    kubectl apply -f k8s/namespace.yaml
@@ -190,51 +86,98 @@ Aegis/
    kubectl apply -f k8s/secret.yaml
    ```
 
-2. 部署三个后端服务与前端：
+   在应用前，你需要根据实际环境修改：
+
+   - `k8s/configmap.yaml` 中的 `LOKI_BASE_URL`、`PROMETHEUS_BASE_URL`、`JAEGER_BASE_URL`
+   - `k8s/configmap.yaml` 中的 `FEISHU_DEFAULT_CHAT_ID`
+   - `k8s/secret.yaml` 中的 `ARK_API_KEY`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_VERIFICATION_TOKEN`
+
+2. 部署 RCA Service：
 
    ```bash
-   kubectl apply -f k8s/chatops-service.yaml
    kubectl apply -f k8s/rca-service.yaml
-   kubectl apply -f k8s/predict-service.yaml
-   kubectl apply -f k8s/frontend.yaml
    ```
 
-3. 通过 Ingress / NodePort 等方式访问前端，开始使用 Aegis。
+3. 将 `/feishu/events` 与 `/alertmanager/webhook` 暴露到集群外（例如通过 Ingress 或 API Gateway），用于：
+
+   - 飞书开放平台事件订阅回调
+   - Alertmanager Webhook 回调
+
+4. 在 Alertmanager 中配置 Webhook 通知地址为 `/alertmanager/webhook`，并在飞书开发者后台配置事件订阅地址为 `/feishu/events`。
+
+### 6. 飞书集成说明（概览）
+
+详细步骤见 [`docs/prd.md`](docs/prd.md) 与 [`docs/user-manual.md`](docs/user-manual.md)，这里给出概要流程：
+
+- 在飞书开放平台创建企业自建应用，获取 `app_id` 与 `app_secret`
+- 配置事件订阅，至少开启：
+  - 机器人收到消息 `im.message.receive_v1`
+- 将应用添加到对应飞书群组，获取群组 `chat_id` 并填入 `FEISHU_DEFAULT_CHAT_ID`
+- 在服务器防火墙与飞书开放平台中放通出入口 IP（可使用飞书“获取事件出口 IP”接口）
+
+### 7. 本地开发与调试
+
+以 rca-service 为例：
+
+```bash
+cd services/rca-service
+pip install -r requirements.txt
+export LOKI_BASE_URL="http://localhost:3100"
+export PROMETHEUS_BASE_URL="http://localhost:9090"
+export JAEGER_BASE_URL="http://localhost:16686"
+export ARK_API_KEY="your-llm-api-key"
+
+uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+```
+
+使用任意 HTTP 客户端调用 `/api/rca/analyze` 即可本地体验 RCA 能力。
+
+更多细节请参考：
+
+- [`docs/api.md`](docs/api.md)
+- [`docs/architecture.md`](docs/architecture.md)
+- [`docs/prd.md`](docs/prd.md)
+- [`docs/user-manual.md`](docs/user-manual.md)
 
 ---
 
-## 6. 接口概览
+## English Overview
 
-详细接口定义见 [`docs/api.md`](docs/api.md)，这里只给出一览表：
+### 1. What Is Aegis RCA Agent
 
-| 服务              | 方法 | 路径                  | 说明           |
-|-------------------|------|-----------------------|----------------|
-| ChatOps Service   | GET  | `/healthz`            | 健康检查       |
-| ChatOps Service   | POST | `/api/chatops/query`  | ChatOps 问答   |
-| RCA Service       | GET  | `/healthz`            | 健康检查       |
-| RCA Service       | POST | `/api/rca/analyze`    | 根因分析       |
-| Predict Service   | GET  | `/healthz`            | 健康检查       |
-| Predict Service   | POST | `/api/predict/run`    | 风险预测       |
+Aegis is now focused on a single capability: **Root Cause Analysis (RCA)** for Kubernetes clusters.
 
----
+The agent runs inside your cluster and consumes observability data in a read-only way:
 
-## 7. 更多文档
+- Prometheus for metrics
+- Loki + Promtail for logs
+- Jaeger for distributed traces
+- Alertmanager webhooks (optional)
+- Feishu Bot as the chat front-end
 
-- 接口文档：[`docs/api.md`](docs/api.md)
-- PRD 文档：[`docs/prd.md`](docs/prd.md)
-- 系统技术架构：[`docs/architecture.md`](docs/architecture.md)
-- 迭代与缺陷总结：[`docs/iterations.md`](docs/iterations.md)
-- 产品使用手册（面向运维）：[`docs/user-manual.md`](docs/user-manual.md)
+Typical workflow:
 
----
+- Alertmanager fires alerts and sends them to Aegis via webhook.
+- Aegis posts a summarized alert notification to a Feishu chat and mentions on-call engineers.
+- When engineers mention the bot and describe the incident, Aegis runs an RCA flow by calling Prometheus/Loki/Jaeger tools and replies with ranked root-cause candidates and next actions.
 
-## 8. 贡献与规划
+The agent is strictly **read-only**. It never performs any write or mutation to your cluster.
 
-未来可考虑的方向：
+### 2. Key Features
 
-- 支持更多监控后端（如 Tempo / Jaeger / OpenSearch）
-- 支持多租户与权限控制
-- 支持更多业务项目的多集群接入与隔离
+- Metrics + logs + traces correlation
+- LangChain-based agent with tool orchestration
+- Ranked root-cause candidates with probabilities and evidence
+- Deep integration with Feishu Bot and Alertmanager
+- Kubernetes-native deployment with simple configuration via ConfigMap/Secret
 
-目前仓库尚未开放公共贡献流程，如需协作或定制化开发，可在内部沟通渠道中联系项目负责人。
+### 3. Deployment
 
+See the Chinese sections above and the detailed documents:
+
+- [`docs/api.md`](docs/api.md)
+- [`docs/architecture.md`](docs/architecture.md)
+- [`docs/prd.md`](docs/prd.md)
+- [`docs/user-manual.md`](docs/user-manual.md)
+
+The English version focuses on high-level concepts; operational documents are currently in Chinese.

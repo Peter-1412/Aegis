@@ -1,227 +1,135 @@
-# Aegis 产品需求文档（PRD）
-
-版本：v1.0  
-适用范围：面向 Todo_List 项目的智能运维助手 Aegis
-
----
+# PRD：Aegis RCA Agent（飞书版）
 
 ## 1. 背景与目标
 
 ### 1.1 背景
 
-在 Todo_List 项目中，已经接入了 Prometheus 和 Loki，对服务、节点、数据库提供了丰富的指标与日志。
-但是传统的运维方式仍然依赖人工在多处控制台中手动构造 PromQL/LogQL、排查日志、交叉比对指标，
-效率低、门槛高、知识难以沉淀。
+当前 Kubernetes 集群已部署 Prometheus、Loki、Jaeger、Grafana、Promtail 等观测组件，但：
 
-大模型 LLM 的能力为“自动写查询语句、解释结果”提供了可能，因此希望建设一套围绕 Todo_List 项目的
-智能运维助手 Aegis，实现“用自然语言进行运维”的体验。
+- 告警信息分散在 Alertmanager 与各类面板中，关联成本高；
+- 故障发生时，SRE 需要在多种工具间来回切换，执行 PromQL / LogQL / Trace 查询；
+- 一线运维同学对底层指标与日志格式不够熟悉，排障效率受限。
 
-### 1.2 产品目标
+希望引入一个面向 SRE 的智能 RCA Agent，将多源观测数据“汇聚到飞书群里”，让运维可以在聊天窗口完成 80% 的根因定位工作。
 
-- 降低运维门槛：只需描述问题，不需要记忆 PromQL / LogQL 细节。
-- 提升排障效率：将“查指标 + 看日志 + 总结结论”的过程自动化。
-- 沉淀运维知识：通过可回放的 Trace 记录 Agent 的思考与操作路径。
-- 支持决策：利用历史数据推断未来风险，辅助容量规划与变更决策。
+### 1.2 目标
 
-### 1.3 不在本期范围
+- 提供一个 **只读** 的 RCA Agent：
+  - 只能调用 Prometheus / Loki / Jaeger 的查询接口；
+  - 不能执行任何变更或运维指令。
+- 与飞书机器人深度集成：
+  - 支持 Alertmanager 告警自动转发到飞书群；
+  - 支持在群聊中自然语言提问并触发 RCA 分析。
+- 输出结构化 RCA 结果：
+  - 排序后的根因候选列表（包含主观概率）；
+  - 对应的关键指标/日志/调用链证据；
+  - 面向运维工程师的后续排查与修复建议。
 
-- 不做变更执行（如自动重启、自动扩容），仅提供分析与建议。
-- 不实现多租户、复杂 RBAC 体系，仅面向单集群的运维团队。
-- 不直接改造 Todo_List 业务代码，只通过指标和日志观测。
+## 2. 角色与使用场景
 
----
+### 2.1 角色
 
-## 2. 用户与场景
+- SRE / 运维工程师：一线故障排查与处置人员。
+- 平台工程师：负责部署与维护 Aegis RCA Agent。
+- LLM 提供方：Ark / 其他兼容 OpenAI 协议的模型。
 
-### 2.1 用户角色
+### 2.2 使用场景
 
-1. **一线 SRE / 运维工程师**
-   - 主要使用 ChatOps 与 RCA 功能。
-   - 在值班、故障处理和日常巡检中高频使用。
+#### 场景 A：告警驱动的被动 RCA
 
-2. **高级 SRE / 架构师**
-   - 同样使用 ChatOps 与 RCA，同时关注 Predict 结果，用于风险评估与容量规划。
+1. 集群中某服务出现异常（错误率升高、延迟抖动、节点异常等）。
+2. Prometheus 触发告警规则，Alertmanager 发送 Webhook 到 Aegis。
+3. Aegis 在飞书告警群内 @所有人，汇总并展示关键信息。
+4. 值班 SRE 在群内回复“@机器人 帮我看下这波 502 的根因”，触发 RCA 流程。
+5. Agent 调用指标/日志/调用链工具分析，回复一条结构化 RCA 结果消息，列出 1~3 个最可能根因及后续建议。
 
-3. **开发工程师**
-   - 在自助排查功能问题时使用 ChatOps/RCA。
-   - 通过预测结果评估新版本发布后的风险趋势。
+#### 场景 B：主动健康检查 / 回溯分析
 
-### 2.2 典型使用场景
-
-1. **日常运维问答（ChatOps）**
-   - “最近 30 分钟 ai-service 是否有 5xx 峰值？”
-   - “user-service 登录成功率最近一小时的变化情况如何？”
-
-2. **故障处置（RCA）**
-   - 已知时间窗口内出现大量 5xx/超时，SRE 将告警信息与时间范围输入 Aegis，
-     期望得到“疑似服务 + 根因描述 + 关键证据 + 操作建议”。
-
-3. **风险预测（Predict）**
-   - 变更前：评估 `todo-service` 未来几小时的风险，决定是否在高峰前发布。
-   - 定期巡检：生成关键服务的风险报告，提前暴露潜在故障模式。
-
----
+1. SRE 在飞书群里输入：
+   - “@机器人 帮我看一下昨天晚上 23 点订单超时的根因”
+2. Agent 使用指定时间窗口进行历史回溯。
+3. 返回与场景 A 类似的结构化 RCA 结果，用于事后复盘。
 
 ## 3. 功能需求
 
-### 3.1 ChatOps 功能
+### 3.1 飞书集成
 
-**3.1.1 功能描述**
+1. 支持企业自建应用模式，使用 `app_id` 和 `app_secret` 获取 `tenant_access_token`。
+2. 支持事件订阅：
+   - `im.message.receive_v1`：接收群聊中@机器人的消息。
+3. 支持通过 OpenAPI `im/v1/messages` 往指定 `chat_id` 发送文本消息。
+4. 支持 URL 校验流程（`url_verification`）。
+5. 支持配置：
+   - `FEISHU_DEFAULT_CHAT_ID`：默认告警/RCA 结果推送群。
 
-- 用户在前端输入自然语言问题及时间范围，系统返回：
-  - 运维视角的直接回答（中文）
-  - 关键使用的 LogQL
-  - 时间范围
-  - 工具调用轨迹（供高级用户查看）
+### 3.2 Alertmanager 集成
 
-**3.1.2 详细需求**
+1. 提供 HTTP 接口 `/alertmanager/webhook`，兼容标准 Alertmanager Webhook 格式。
+2. 支持多条告警合并为一条飞书消息：
+   - 显示 `alertname`、`severity`、`instance`/`pod`/`service` 等关键标签；
+   - 显示 `summary` 或 `description` 注释；
+   - 消息开头默认携带 `@所有人`。
+3. Webhook 处理逻辑不阻塞 Alertmanager（只要入队成功即返回 200）。
 
-1. 支持 `question + time_range + session_id` 三个字段：
-   - `question`：必填。
-   - `time_range`：可为 `start/end` 或 `last_minutes`。
-   - `session_id`：可选，用于多轮对话。
-2. Agent 必须优先使用：
-   - Prometheus 做健康检查和宏观趋势分析；
-   - Loki 做详细错误日志与行为日志分析。
-3. 系统应显示最近一次分析使用的关键 LogQL，便于用户复制粘贴到 Loki 控制台。
-4. 输出要求简洁、自洽、面向工程师，可直接指导下一步操作。
+### 3.3 RCA Agent 能力
 
-### 3.2 RCA 功能
+1. 入口：
+   - 飞书消息事件：自动将文本作为 `description`，并使用最近 15 分钟时间窗口。
+   - HTTP API：`/api/rca/analyze` 和 `/api/rca/analyze/stream`，支持外部系统直接调用。
+2. 工具集（只读）：
+   - `prometheus_query_range`：查询指定 PromQL 在时间范围内的序列。
+   - `rca_collect_evidence`：从 Loki 抓取含错误关键词/状态码的日志行，并按服务优先级聚合。
+   - `jaeger_query_traces`：从 Jaeger 查询指定服务在时间范围内的代表性 Trace 简要信息。
+   - `trace_note`：记录计划与意图，用于可观测 Agent 行为。
+3. 输出结构：
+   - `summary`：中文自然语言总结。
+   - `ranked_root_causes`：
+     - 包含 `rank`、`service`、`probability`、`description`、`key_indicators`、`key_logs`。
+     - 至多 3 条。
+   - `next_actions`：后续建议。
+4. Agent 行为约束：
+   - 系统 Prompt 中明确禁止描述或假装执行任何变更动作。
+   - 查询不到数据时必须如实说明，不得编造指标或日志内容。
 
-**3.2.1 功能描述**
+### 3.4 安全与权限
 
-针对一次已知的故障事件，用户提供故障描述与时间范围，系统返回：
+1. 所有对 Prometheus / Loki / Jaeger 的访问仅通过 HTTP 读接口完成。
+2. 不在容器内挂载 kubeconfig / 云厂商 AK/SK 等高权限凭据。
+3. 飞书 `app_secret`、`verification_token` 与 LLM `API_KEY` 均存放在 K8s Secret 中。
+4. 提供只读的 HTTP API，不暴露任何写操作。
 
-- 故障摘要（summary）
-- 疑似服务（suspected_service）
-- 根因描述（root_cause）
-- 关键证据列表（evidence）
-- 建议行动列表（suggested_actions）
-
-**3.2.2 详细需求**
-
-1. 必须支持从多个服务批量收集错误/异常相关日志：
-   - 通过 `service_patterns` 聚焦服务名片段；
-   - 通过 `text_patterns` 聚焦日志内容关键词。
-2. 必须结合 Prometheus 指标（错误率、延迟、业务指标）与日志证据给出结论。
-3. 输出的 `evidence` 应能直接引用到日志/指标中的具体片段（方便人类复核）。
-4. 支持通过 session_id 暂存 RCA 多轮对话。
-
-### 3.3 Predict 功能
-
-**3.3.1 功能描述**
-
-用户选择一个服务及回看小时数，系统结合历史错误日志与关键指标，输出：
-
-- `risk_score`：0~1 风险分（主观概率）
-- `risk_level`：风险等级（low / medium / high）
-- `likely_failures`：未来可能出现的故障类型列表
-- `explanation`：风险判断依据的中文说明
-
-**3.3.2 详细需求**
-
-1. Agent 必须主动调用：
-   - Prometheus：请求量、错误率、P95/P99 延迟、关键业务指标；
-   - Loki：错误日志计数时间序列与代表性错误样本。
-2. 风险分 `risk_score` 由大模型综合判断，内置算法仅作为兜底，不是主导逻辑。
-3. 风险等级与分数应保持一致性，提升可解释性。
-4. 需支持 session_id，用于连续多次预测时共享上下文。
-
-### 3.4 前端控制台
-
-**3.4.1 统一入口**
-
-提供单页应用，包含三个子页面：
-
-- ChatOps 页面
-- RCA 页面
-- Predict 页面
-
-**3.4.2 展示与交互**
-
-每个页面至少提供：
-
-- 请求参数表单（文本输入 / 时间选择 / 下拉选择服务等）
-- 结果展示区（回答 / 分析结果）
-- 工具调用轨迹（可折叠）
-- 关键 LogQL / LogQL 的复制功能
-
----
-
-## 4. 非功能需求
+## 4. 非功能性需求
 
 ### 4.1 性能
 
-- 单次请求（不涉及超长时间范围）应在 **5~10 秒** 内返回结果（取决于 LLM 时延）。
-- 对于长时间窗口（>24h）的查询，允许相对较长的等待时间，但需要在前端有 Loading 提示。
+- 单次 RCA 分析默认控制在 30~60 秒内完成。
+- 工具调用并发数受 LangChain Agent 策略控制，必要时可在后续迭代中增加限流。
 
 ### 4.2 可用性
 
-- 即使 Prometheus/Loki/LLM 任一不可用，系统也应返回有信息量的错误提示，而非直接 500。
-- 对工具调用异常要做错误封装，避免未捕获异常导致接口挂掉。
+- rca-service 在生产环境建议至少 2 副本，支持滚动升级。
+- 内部错误不得影响 Alertmanager 和飞书的正常运行（即便失败也应返回 200/简单错误信息）。
 
 ### 4.3 可观测性
 
-- 后端服务应输出结构化日志，便于自身被 Loki 监控。
-- 关键路径（调用 LLM、Loki、Prometheus）的错误要有明确日志与统计。
+- rca-service 自身应输出结构化日志，方便在 Loki 中检索。
+- 关键路径添加简单指标（如请求耗时、LLM 调用失败次数）可在后续迭代中补充。
 
-### 4.4 安全性
+## 5. 交付物
 
-- 当前示例环境未开启鉴权，真实生产环境应通过网关增加认证鉴权。
-- 不在 Agent Prompt 中暴露敏感凭据或内部实现细节。
+1. `rca-service` 源码（Python + FastAPI + LangChain）。
+2. 可直接构建的 Dockerfile。
+3. Kubernetes 部署清单：
+   - Namespace / ConfigMap / Secret / Deployment / Service。
+4. 文档：
+   - README（中英文）
+   - `docs/api.md`：接口文档
+   - `docs/architecture.md`：架构文档
+   - `docs/user-manual.md`：使用手册（面向运维）
 
----
+## 6. 未来迭代方向（非本期）
 
-## 5. 业务流程（高层）
-
-### 5.1 ChatOps 流程
-
-1. 用户在前端 ChatOps 页面输入问题与时间范围。
-2. 前端调用 ChatOps Service `/api/chatops/query`。
-3. ChatOps Agent：
-   - 解析问题，决定调用 Prometheus/Loki 的方式；
-   - 分多步调用工具（前置 trace_note）；
-   - 综合结果生成回答。
-4. 后端返回回答 + LogQL + Trace，前端展示。
-
-### 5.2 RCA 流程
-
-1. 用户输入故障描述与时间窗口。
-2. 前端调用 `/api/rca/analyze`。
-3. RCA Agent：
-   - 结合症状与时间窗口，查询关键指标；
-   - 调用 `rca_collect_evidence` 批量收集错误日志；
-   - 形成根因假设、挑选证据、输出结构化 JSON。
-4. 前端展示 RCA 报告和 Trace。
-
-### 5.3 Predict 流程
-
-1. 用户选择服务与回看窗口。
-2. 前端调用 `/api/predict/run`。
-3. Predict Agent：
-   - 查询指标与错误日志特征；
-   - 大模型综合判断风险分与可能故障类型；
-   - 返回结构化结果。
-4. 前端以卡片或图表方式展示。
-
----
-
-## 6. 依赖与约束
-
-- 必须有可用的 Prometheus 与 Loki 实例，并正确采集 Todo_List 的指标与日志。
-- 指标与日志结构需与 `Todo_List/docs/monitoring_queries_agent.md` 约定保持一致。
-- LLM 接入（目前为火山方舟 Ark）需要有效的密钥和网络连通性。
-
----
-
-## 7. 版本规划（简要）
-
-1. **v0.1**：基础三服务 + 前端最小可用 UI。
-2. **v0.2**：接入 Prometheus 工具，支持指标查询。
-3. **v0.3**：工具拆分为单文件、提升可维护性。
-4. **v0.4**：统一命名空间与资源命名为 `aegis`。
-5. **v0.5**：针对 Todo_List 场景优化 Prompt，Predict 改为 LLM 主导风险评估。
-6. **v0.6**：修复 Prompt 花括号与 Prometheus 时间解析等问题，提升鲁棒性。
-
-详细迭代记录见 [`docs/iterations.md`](iterations.md)。
+- 支持多租户、多集群场景（通过标签/命名空间隔离）。
+- 与更多观测后端集成（Tempo / OpenSearch / ClickHouse 等）。
+- 引入规则引擎与知识库，将经验型 SRE 规则结构化沉淀。
 
