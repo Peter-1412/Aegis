@@ -118,6 +118,15 @@ async def _handle_feishu_text(chat_id: str, text: str):
         return
     now = datetime.now(_CST)
     logging.info("feishu request received, chat_id=%s, text=%s", chat_id, text)
+    ack_lines: list[str] = []
+    ack_lines.append(f"收到，我来帮您查询：{text}")
+    ack_lines.append("预计需要 1~3 分钟，请稍候，我会在分析完成后把结果发给您。")
+    ack_text = "\n".join(ack_lines)
+    try:
+        logging.info("sending feishu ack, chat_id=%s, length=%s", chat_id, len(ack_text))
+        await feishu_client.send_text_message(chat_id=chat_id, text=ack_text)
+    except Exception as exc:
+        logging.exception("send feishu ack failed: %s", exc)
     req = RCARequest(
         description=text,
         time_range=TimeRange(start=now - timedelta(hours=1), end=now),
@@ -134,21 +143,21 @@ async def _handle_feishu_text(chat_id: str, text: str):
         "rca finished, chat_id=%s, summary=%s", chat_id, (res.summary or "")[:200]
     )
     lines: list[str] = []
-    lines.append("【自动RCA分析结果】")
-    lines.append(f"时间范围（CST）：{(now - timedelta(hours=1)).isoformat()} ~ {now.isoformat()}")
-    lines.append(f"故障描述：{text}")
+    lines.append("【RCA结果】")
+    lines.append(f"时间（CST）：{(now - timedelta(hours=1)).isoformat()} ~ {now.isoformat()}")
+    lines.append(f"问题：{text}")
     lines.append("")
-    lines.append(f"总结：{res.summary}")
+    lines.append(f"结论：{res.summary}")
     if res.ranked_root_causes:
         lines.append("")
-        lines.append("可能的根因候选：")
+        lines.append("可能原因：")
         for c in res.ranked_root_causes[:3]:
             prob = f"，概率≈{c.probability:.2f}" if c.probability is not None else ""
             svc = f"（服务：{c.service}）" if c.service else ""
             lines.append(f"{c.rank}. {c.description}{svc}{prob}")
     if res.next_actions:
         lines.append("")
-        lines.append("建议后续操作：")
+        lines.append("后续建议：")
         for idx, act in enumerate(res.next_actions, start=1):
             lines.append(f"{idx}. {act}")
     text_msg = "\n".join(lines)
