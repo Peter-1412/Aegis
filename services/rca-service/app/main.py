@@ -79,6 +79,15 @@ def _stringify(value) -> str:
         return str(value)
 
 
+def _sanitize_feishu_text(text: str) -> str:
+    parts: list[str] = []
+    for token in text.split():
+        if token.startswith("@_user_"):
+            continue
+        parts.append(token)
+    return " ".join(parts).strip()
+
+
 def _build_trace(intermediate_steps) -> AgentTrace:
     steps: list[TraceStep] = []
     for idx, pair in enumerate(intermediate_steps or []):
@@ -113,9 +122,10 @@ class FeishuIncoming(BaseModel):
 
 
 async def _handle_feishu_text(chat_id: str, text: str):
-    text = text.strip()
-    if not text:
+    raw_text = text.strip()
+    if not raw_text:
         return
+    text = _sanitize_feishu_text(raw_text)
     now = datetime.now(_CST)
     logging.info("feishu request received, chat_id=%s, text=%s", chat_id, text)
     ack_lines: list[str] = []
@@ -143,19 +153,15 @@ async def _handle_feishu_text(chat_id: str, text: str):
     )
     lines: list[str] = []
     lines.append("【RCA结果】")
-    lines.append(f"时间（CST）：{(now - timedelta(hours=1)).isoformat()} ~ {now.isoformat()}")
     lines.append(f"问题：{text}")
-    lines.append("")
     lines.append(f"结论：{res.summary}")
     if res.ranked_root_causes:
-        lines.append("")
         lines.append("可能原因：")
         for c in res.ranked_root_causes[:3]:
             prob = f"，概率≈{c.probability:.2f}" if c.probability is not None else ""
             svc = f"（服务：{c.service}）" if c.service else ""
             lines.append(f"{c.rank}. {c.description}{svc}{prob}")
     if res.next_actions:
-        lines.append("")
         lines.append("后续建议：")
         for idx, act in enumerate(res.next_actions, start=1):
             lines.append(f"{idx}. {act}")
