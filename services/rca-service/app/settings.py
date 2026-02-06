@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     per_service_log_limit: int = 200
     max_total_evidence_lines: int = 200
 
-    llm_model: str = "doubao-seed-1-8-251228"
+    llm_model: str = "ep-20260207075658-4d5bg"
     ark_api_key: str | None = None
     ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
 
