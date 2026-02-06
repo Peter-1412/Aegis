@@ -119,8 +119,7 @@ async def _handle_feishu_text(chat_id: str, text: str):
     now = datetime.now(_CST)
     logging.info("feishu request received, chat_id=%s, text=%s", chat_id, text)
     ack_lines: list[str] = []
-    ack_lines.append(f"收到，我来帮您查询：{text}")
-    ack_lines.append("预计需要 1~3 分钟，请稍候，我会在分析完成后把结果发给您。")
+    ack_lines.append(f"收到，我来帮您查询，预计需要 1~3 分钟，我会在分析完成后把结果发给您。")
     ack_text = "\n".join(ack_lines)
     try:
         logging.info("sending feishu ack, chat_id=%s, length=%s", chat_id, len(ack_text))
