@@ -7,9 +7,9 @@ from langchain.memory import ConversationBufferMemory
 
 
 try:
-    from langchain.agents import create_tool_calling_agent
+    from langchain.agents import create_react_agent as _create_agent
 except Exception:
-    from langchain.agents import create_openai_functions_agent as create_tool_calling_agent
+    from langchain.agents import create_tool_calling_agent as _create_agent
 
 
 def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory | None) -> AgentExecutor:
@@ -56,7 +56,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
             MessagesPlaceholder(variable_name="agent_scratchpad"),
         ]
     )
-    agent = create_tool_calling_agent(llm, tools, prompt)
+    agent = _create_agent(llm, tools, prompt)
     return AgentExecutor(
         agent=agent,
         tools=tools,
