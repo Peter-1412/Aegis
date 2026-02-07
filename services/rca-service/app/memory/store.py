@@ -27,7 +27,12 @@ def get_memory(session_id: str | None) -> ConversationBufferMemory | None:
         _memories[session_id] = (memory, now)
         logging.info("memory hit, session_id=%s", session_id)
         return memory
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        return_messages=True,
+        input_key="input",
+        output_key="output",
+    )
     _memories[session_id] = (memory, now)
     logging.info("memory created, session_id=%s, total=%s", session_id, len(_memories))
     return memory

@@ -16,6 +16,7 @@ class OllamaChat(BaseChatModel):
     model: str
     host: str
     streaming: bool = False
+    disable_thinking: bool = True
 
     @property
     def _llm_type(self) -> str:
@@ -23,7 +24,7 @@ class OllamaChat(BaseChatModel):
 
     def _build_messages(self, messages: List[BaseMessage]) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
-        if settings.ollama_disable_thinking:
+        if self.disable_thinking:
             items.append(
                 {
                     "role": "system",
@@ -159,7 +160,7 @@ class OllamaChat(BaseChatModel):
         return ChatResult(generations=[generation])
 
 
-def get_llm(streaming: bool = False) -> BaseChatModel:
+def get_llm(streaming: bool = False, allow_thinking: bool = False) -> BaseChatModel:
     logging.info(
         "llm init, model=%s, base_url=%s, streaming=%s",
         settings.ollama_model,
@@ -170,4 +171,5 @@ def get_llm(streaming: bool = False) -> BaseChatModel:
         model=settings.ollama_model,
         host=settings.ollama_base_url,
         streaming=streaming,
+        disable_thinking=settings.ollama_disable_thinking and not allow_thinking,
     )
