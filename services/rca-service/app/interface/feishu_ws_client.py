@@ -120,12 +120,13 @@ def main() -> None:
     else:
         logger.warning("bot_p2p_chat_entered handler not registered due to sdk version")
     handler = builder.build()
-    ws = lark.ws.Client(
-        client,
-        lark.ws.WithLogLevel(logging.INFO),
-        lark.ws.WithEventHandler(handler),
-        lark.ws.WithReconnectInterval(5),
-    )
+    ws_args = []
+    if hasattr(lark.ws, "WithLogLevel"):
+        ws_args.append(lark.ws.WithLogLevel(logging.INFO))
+    ws_args.append(lark.ws.WithEventHandler(handler))
+    if hasattr(lark.ws, "WithReconnectInterval"):
+        ws_args.append(lark.ws.WithReconnectInterval(5))
+    ws = lark.ws.Client(client, *ws_args)
     ws.start()
 
 
