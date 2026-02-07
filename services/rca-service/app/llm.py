@@ -21,6 +21,13 @@ class OllamaChat(BaseChatModel):
 
     def _build_messages(self, messages: List[BaseMessage]) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
+        if settings.ollama_disable_thinking:
+            items.append(
+                {
+                    "role": "system",
+                    "content": "不要输出思考过程或<think>标签，只给出最终答案，尽量简短直接。",
+                }
+            )
         for m in messages:
             role = getattr(m, "type", "") or getattr(m, "role", "")
             content = str(getattr(m, "content", "") or "")
@@ -52,11 +59,17 @@ class OllamaChat(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         payload_messages = self._build_messages(messages)
+        options: dict[str, Any] = {
+            "num_predict": settings.ollama_num_predict,
+            "temperature": settings.ollama_temperature,
+            "top_p": settings.ollama_top_p,
+        }
         client = ollama.Client(host=self.host)
         res = client.chat(
             model=self.model,
             messages=payload_messages,
             stream=False,
+            options=options,
         )
         content = ""
         try:
@@ -75,11 +88,17 @@ class OllamaChat(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         payload_messages = self._build_messages(messages)
+        options: dict[str, Any] = {
+            "num_predict": settings.ollama_num_predict,
+            "temperature": settings.ollama_temperature,
+            "top_p": settings.ollama_top_p,
+        }
         client = ollama.AsyncClient(host=self.host)
         res = await client.chat(
             model=self.model,
             messages=payload_messages,
             stream=False,
+            options=options,
         )
         content = ""
         try:

@@ -5,6 +5,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationBufferMemory
 
+from ..settings import settings
 
 try:
     from langchain.agents import create_react_agent as _create_agent
@@ -67,4 +68,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
         verbose=True,
         handle_parsing_errors=True,
         return_intermediate_steps=True,
+        max_iterations=settings.agent_max_iterations,
+        max_execution_time=settings.agent_max_execution_time_s,
+        early_stopping_method="generate",
     )

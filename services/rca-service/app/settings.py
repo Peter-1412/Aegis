@@ -19,6 +19,13 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = "http://192.169.223.108:11434"
     ollama_model: str = "deepseek-r1:32b"
+    ollama_disable_thinking: bool = True
+    ollama_num_predict: int = 512
+    ollama_temperature: float = 0.1
+    ollama_top_p: float = 0.9
+
+    agent_max_iterations: int = 12
+    agent_max_execution_time_s: float = 180.0
 
     feishu_app_id: str | None = None
     feishu_app_secret: str | None = None
