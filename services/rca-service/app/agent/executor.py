@@ -51,15 +51,15 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
                 "语言必须简洁、专业、直接，避免长段落和重复叙述，不要出现客套话。"
                 "summary 控制在 2~3 句内；每个 ranked_root_causes[*].description 控制在 1~2 句内；"
                 "key_indicators 和 key_logs 使用短语或极简句子；next_actions 不超过 5 条，每条不超过 1 句，可直接以动词开头。"
-                "你必须严格按照以下格式输出。只有在需要调用工具时才输出 Thought/Action/Action Input/Observation；"
+                "你必须严格按照以下格式输出。只有在需要调用工具时才输出 Thought/Action/Action Input；"
+                "不要在输出中自行写 Observation，Observation 由系统回填。"
                 "如果不需要工具，直接输出 Final。"
                 "格式：\n"
                 "Question: {input}\n"
                 "Thought: 你的思考\n"
                 "Action: 工具名称（必须是可用工具之一）\n"
-                "Action Input: 工具入参（JSON 或文本）\n"
-                "Observation: 工具输出\n"
-                "...（可重复 Thought/Action/Action Input/Observation 多次）\n"
+                "Action Input: 工具入参（只能是纯 JSON，不要使用代码块，不要包含 Observation/Final/多余文本）\n"
+                "...（可重复 Thought/Action/Action Input 多次）\n"
                 "Final: 只输出一个 JSON 对象，禁止任何额外文本。\n"
                 "以下是可用工具名称和详细说明，请据此规划工具调用顺序。"
                 "可用工具名称列表：{tool_names}。"
@@ -67,7 +67,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
             ),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
-            ("human", "{agent_scratchpad}"),
+            ("assistant", "{agent_scratchpad}"),
         ]
     )
     agent = _create_agent(llm, tools, prompt)
