@@ -80,8 +80,8 @@
     "steps": [
       {
         "index": 0,
-        "tool": "trace_note",
-        "tool_input": "计划先查看 todo-service 的错误率和延迟情况。",
+        "tool": "prometheus_query_range",
+        "tool_input": "{\"query\":\"sum(rate(http_requests_total{service=\\\"todo-service\\\",status=~\\\"5..\\\"}[5m]))\",\"start_iso\":\"2025-01-15T20:10:00+08:00\",\"end_iso\":\"2025-01-15T20:25:00+08:00\",\"step\":\"30s\"}",
         "observation": null,
         "log": null
       }
@@ -119,7 +119,6 @@
 - `llm_start` / `llm_token` / `llm_end`：LLM 调用过程
 - `agent_thought`：Agent 思考过程（规划阶段）
 - `agent_action`：执行某个工具
-- `trace_note`：Agent 填写的计划记录
 - `tool_start` / `tool_end`：具体工具调用前后
 - `agent_observation`：Agent 对工具返回结果的观察
 - `error`：流程中发生错误
@@ -132,11 +131,12 @@
 
 ## 5. 飞书长连接事件处理
 
-rca-service 在启动时会使用 `lark-oapi` 建立与飞书开放平台的长连接，订阅 `im.message.receive_v1` 事件：
+rca-service 提供独立的飞书事件网关（长连接），使用 `lark-oapi` 订阅 `im.message.receive_v1` 事件：
 
 - 当用户在飞书群中 @ 机器人并发送文本消息时：
   - SDK 通过长连接收到事件；
-  - rca-service 将消息文本作为 `description`，使用最近 15 分钟时间窗口调用内部 `_run_rca`；
+  - 事件网关将消息转发到 rca-service 的 `/feishu/receive`；
+  - rca-service 将消息文本作为 `description`，使用最近 15 分钟时间窗口执行 RCA；
   - 分析完成后，通过开放平台接口向同一个 `chat_id` 发送结构化文本结果。
 
 该模式下不再暴露 `/feishu/events` HTTP 回调接口，也不需要配置任何公网 IP 或域名。

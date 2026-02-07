@@ -68,7 +68,7 @@
    - 显示 `alertname`、`severity`、`instance`/`pod`/`service` 等关键标签；
    - 显示 `summary` 或 `description` 注释；
    - 消息开头默认携带 `@所有人`。
-3. Webhook 处理逻辑不阻塞 Alertmanager（只要入队成功即返回 200）。
+3. Webhook 处理逻辑尽量快速返回，避免阻塞 Alertmanager。
 
 ### 3.3 RCA Agent 能力
 
@@ -77,9 +77,8 @@
    - HTTP API：`/api/rca/analyze` 和 `/api/rca/analyze/stream`，支持外部系统直接调用。
 2. 工具集（只读）：
    - `prometheus_query_range`：查询指定 PromQL 在时间范围内的序列。
-   - `rca_collect_evidence`：从 Loki 抓取含错误关键词/状态码的日志行，并按服务优先级聚合。
+   - `loki_collect_evidence`：从 Loki 抓取含错误关键词/状态码的日志行，并按服务优先级聚合。
    - `jaeger_query_traces`：从 Jaeger 查询指定服务在时间范围内的代表性 Trace 简要信息。
-   - `trace_note`：记录计划与意图，用于可观测 Agent 行为。
 3. 输出结构：
    - `summary`：中文自然语言总结。
    - `ranked_root_causes`：

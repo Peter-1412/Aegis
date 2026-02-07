@@ -2,27 +2,53 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import asyncio
+import contextvars
 import json
+import logging
+import time
+import uuid
 from typing import AsyncIterator
 
-import logging
-import uuid
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-
+from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel
 
-from .feishu_client import feishu_client
-from .llm import get_llm
-from .loki_client import LokiClient
-from .models import AgentTrace, RCAOutput, RCARequest, RCAResponse, TimeRange, TraceStep
-from .settings import settings
-from .agent.executor import build_executor
-from .memory.store import get_memory
-from .tools import build_tools
+from app.agent.rca_agent import RcaAgent, ensure_cst
+from app.interface.feishu_client import feishu_client
+from app.models import RCARequest, RCAResponse, TimeRange
+from config.config import settings
+
+
+_request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
+
+
+class _RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.request_id = _request_id_var.get()
+        except Exception:
+            record.request_id = None
+        return True
+
+
+class _JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "service": "rca-service",
+            "request_id": getattr(record, "request_id", None),
+            "msg": record.getMessage(),
+        }
+        try:
+            if record.exc_info:
+                payload["exc"] = self.formatException(record.exc_info)
+        except Exception:
+            pass
+        return json.dumps(payload, ensure_ascii=False)
 
 
 class _HealthzAccessFilter(logging.Filter):
@@ -41,6 +67,20 @@ class _HealthzAccessFilter(logging.Filter):
         return True
 
 
+_root = logging.getLogger()
+_root.setLevel(logging.INFO)
+_json_formatter = _JSONFormatter()
+_has_handler = False
+for _handler in _root.handlers:
+    _handler.setFormatter(_json_formatter)
+    _handler.addFilter(_RequestIdFilter())
+    _has_handler = True
+if not _has_handler:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_json_formatter)
+    _handler.addFilter(_RequestIdFilter())
+    _root.addHandler(_handler)
+
 logging.getLogger("uvicorn.access").addFilter(_HealthzAccessFilter())
 
 
@@ -51,21 +91,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-loki = LokiClient(settings.loki_base_url, settings.loki_tenant_id, settings.request_timeout_s)
+rca_agent = RcaAgent()
+
+
+@app.middleware("http")
+async def _request_id_middleware(request: Request, call_next):
+    req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    token = _request_id_var.set(req_id)
+    try:
+        response = await call_next(request)
+        response.headers["x-request-id"] = req_id
+        return response
+    finally:
+        _request_id_var.reset(token)
 
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok", "service": settings.service_name}
-
-
-_CST = timezone(timedelta(hours=8))
-
-
-def _ensure_cst(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=_CST)
-    return dt.astimezone(_CST)
 
 
 def _stringify(value) -> str:
@@ -88,34 +131,6 @@ def _sanitize_feishu_text(text: str) -> str:
     return " ".join(parts).strip()
 
 
-def _build_trace(intermediate_steps) -> AgentTrace:
-    steps: list[TraceStep] = []
-    for idx, pair in enumerate(intermediate_steps or []):
-        try:
-            action, observation = pair
-        except Exception:
-            continue
-        tool = str(getattr(action, "tool", "") or "")
-        tool_input = getattr(action, "tool_input", None)
-        log = getattr(action, "log", None)
-        obs_text = _stringify(observation)
-        if len(obs_text) > 8000:
-            obs_text = obs_text[:8000] + "\n...(truncated)"
-        inp_text = _stringify(tool_input)
-        if len(inp_text) > 4000:
-            inp_text = inp_text[:4000] + "\n...(truncated)"
-        steps.append(
-            TraceStep(
-                index=idx,
-                tool=tool,
-                tool_input=inp_text or None,
-                observation=obs_text or None,
-                log=str(log) if log else None,
-            )
-        )
-    return AgentTrace(steps=steps)
-
-
 class FeishuIncoming(BaseModel):
     chat_id: str
     text: str
@@ -126,11 +141,9 @@ async def _handle_feishu_text(chat_id: str, text: str):
     if not raw_text:
         return
     text = _sanitize_feishu_text(raw_text)
-    now = datetime.now(_CST)
+    now = datetime.now(timezone(timedelta(hours=8)))
     logging.info("feishu request received, chat_id=%s, text=%s", chat_id, text)
-    ack_lines: list[str] = []
-    ack_lines.append(f"收到，我来帮您查询，预计需要 1~3 分钟，我会在分析完成后把结果发给您。")
-    ack_text = "\n".join(ack_lines)
+    ack_text = "收到，我来帮您查询，预计需要 1~3 分钟，我会在分析完成后把结果发给您。"
     try:
         logging.info("sending feishu ack, chat_id=%s, length=%s", chat_id, len(ack_text))
         await feishu_client.send_text_message(chat_id=chat_id, text=ack_text)
@@ -138,18 +151,32 @@ async def _handle_feishu_text(chat_id: str, text: str):
         logging.exception("send feishu ack failed: %s", exc)
     req = RCARequest(
         description=text,
-        time_range=TimeRange(start=now - timedelta(hours=1), end=now),
+        time_range=TimeRange(start=now - timedelta(minutes=15), end=now),
         session_id=chat_id,
     )
     logging.info(
         "start rca for chat_id=%s, window=%s~%s",
         chat_id,
-        (now - timedelta(hours=1)).isoformat(),
+        (now - timedelta(minutes=15)).isoformat(),
         now.isoformat(),
     )
-    res = await _run_rca(req)
+    t0 = time.monotonic()
+    try:
+        res = await rca_agent.analyze(req)
+    except Exception as exc:
+        logging.exception("rca failed for feishu, chat_id=%s, error=%s", chat_id, exc)
+        error_text = "抱歉，分析过程中出现错误，请稍后重试或联系平台同学查看日志。"
+        try:
+            await feishu_client.send_text_message(chat_id=chat_id, text=error_text)
+        except Exception as send_exc:
+            logging.exception("send feishu error message failed: %s", send_exc)
+        raise
+    dt = time.monotonic() - t0
     logging.info(
-        "rca finished, chat_id=%s, summary=%s", chat_id, (res.summary or "")[:200]
+        "rca finished, chat_id=%s, duration_s=%.3f, summary_len=%s",
+        chat_id,
+        dt,
+        len(res.summary or ""),
     )
     lines: list[str] = []
     lines.append("【RCA结果】")
@@ -291,18 +318,6 @@ class RCAStreamHandler(AsyncCallbackHandler):
             name = serialized.get("name") or serialized.get("tool")
         if not name:
             name = str(serialized)
-        if name == "trace_note":
-            self.current_workflow_stage = "planning"
-            if not self.current_step_id:
-                self.current_step_id = self._next_step_id()
-            await self._send_event(
-                "trace_note",
-                {
-                    "note": _stringify(input_str),
-                    "step_id": self.current_step_id,
-                },
-            )
-            return
         self.current_workflow_stage = "executing"
         self.current_step_id = self._next_step_id()
         await self._send_event(
@@ -343,72 +358,78 @@ class RCAStreamHandler(AsyncCallbackHandler):
         )
 
 
-async def _run_rca(req: RCARequest, callbacks: list | None = None) -> RCAResponse:
-    start = _ensure_cst(req.time_range.start)
-    end = _ensure_cst(req.time_range.end)
-    if end <= start:
-        raise HTTPException(status_code=400, detail="end必须大于start。")
-
-    llm = get_llm(streaming=callbacks is not None)
-    tools = build_tools(loki)
-    memory = get_memory(req.session_id)
-    executor = build_executor(llm, tools, memory)
-
-    agent_input = (
-        f"故障描述：{req.description}\n"
-        f"时间范围（CST，UTC+8）：{start.isoformat()} ~ {end.isoformat()}\n\n"
-        "请结合可用的 Prometheus/Loki/Jaeger 工具完成根因分析，并严格按照系统提示中的 JSON schema 输出结果。"
-    )
-    config = {"callbacks": callbacks} if callbacks else None
-    res = await executor.ainvoke({"input": agent_input}, config=config)
-    raw = str(res.get("output") or "")
-    try:
-        out = RCAOutput.model_validate_json(raw)
-    except Exception:
-        out = RCAOutput(summary=raw.strip() or "模型输出为空。", ranked_root_causes=[], next_actions=[])
-    trace = _build_trace(res.get("intermediate_steps"))
-    return RCAResponse(
-        summary=out.summary,
-        ranked_root_causes=out.ranked_root_causes or [],
-        next_actions=out.next_actions or [],
-        trace=trace,
-    )
-
-
 @app.post("/api/rca/analyze", response_model=RCAResponse)
 async def analyze(req: RCARequest) -> RCAResponse:
-    return await _run_rca(req)
+    try:
+        t0 = time.monotonic()
+        res = await rca_agent.analyze(req)
+        dt = time.monotonic() - t0
+        logging.info(
+            "rca analyze api done, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s",
+            dt,
+            len(res.summary or ""),
+            len(res.ranked_root_causes or []),
+            len(res.next_actions or []),
+        )
+        return res
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/rca/analyze/stream")
 async def analyze_stream(req: RCARequest):
     queue: asyncio.Queue = asyncio.Queue()
+    req_id = _request_id_var.get() or str(uuid.uuid4())
 
     async def runner():
         try:
+            token = _request_id_var.set(req_id)
             handler = RCAStreamHandler(queue)
-            start = _ensure_cst(req.time_range.start)
-            end = _ensure_cst(req.time_range.end)
+            start = ensure_cst(req.time_range.start)
+            end = ensure_cst(req.time_range.end)
+            logging.info(
+                "rca stream start, start=%s, end=%s, session_id=%s",
+                start.isoformat(),
+                end.isoformat(),
+                handler.session_id,
+            )
             await queue.put(
                 {
                     "event": "start",
                     "start": start.isoformat(),
                     "end": end.isoformat(),
+                    "request_id": req_id,
                 }
             )
-            res = await _run_rca(req, callbacks=[handler])
+            t0 = time.monotonic()
+            res = await rca_agent.analyze(req, callbacks=[handler])
+            dt = time.monotonic() - t0
             meta = {
                 "event": "final",
                 "summary": res.summary,
                 "ranked_root_causes": [c.model_dump() for c in res.ranked_root_causes],
                 "next_actions": res.next_actions,
                 "trace": res.trace.dict() if res.trace else None,
+                "request_id": req_id,
             }
+            logging.info(
+                "rca stream final, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s",
+                dt,
+                len(res.summary or ""),
+                len(res.ranked_root_causes or []),
+                len(res.next_actions or []),
+            )
             await queue.put(meta)
         except Exception as exc:
-            await queue.put({"event": "error", "message": str(exc)})
+            logging.exception("rca stream error: %s", exc)
+            await queue.put({"event": "error", "message": str(exc), "request_id": req_id})
         finally:
-            await queue.put({"event": "end"})
+            logging.info("rca stream end")
+            try:
+                _request_id_var.reset(token)
+            except Exception:
+                pass
+            await queue.put({"event": "end", "request_id": req_id})
 
     asyncio.create_task(runner())
 
@@ -428,24 +449,20 @@ async def alertmanager_webhook(payload: AlertmanagerWebhook):
     chat_id = settings.feishu_default_chat_id
     if not chat_id:
         return {"status": "ignored", "reason": "feishu_default_chat_id not configured"}
-
     alerts = payload.alerts or []
     if not alerts:
         return {"status": "ignored", "reason": "no alerts"}
-
     logging.info(
         "alertmanager webhook received, status=%s, alert_count=%s",
         payload.status,
         len(alerts),
     )
-
     lines: list[str] = []
     lines.append("@所有人")
     lines.append("【Kubernetes 集群告警通知】")
     lines.append(f"Alertmanager status: {payload.status or 'unknown'}")
     lines.append(f"告警数量: {len(alerts)}")
     lines.append("")
-
     for idx, alert in enumerate(alerts, start=1):
         labels = alert.labels or {}
         annotations = alert.annotations or {}
@@ -456,8 +473,16 @@ async def alertmanager_webhook(payload: AlertmanagerWebhook):
         lines.append(f"{idx}. [{severity}] {name} @ {instance}")
         if summary:
             lines.append(f"   概要: {summary}")
-
     text_msg = "\n".join(lines)
-    await feishu_client.send_text_message(chat_id=chat_id, text=text_msg)
+    try:
+        await feishu_client.send_text_message(chat_id=chat_id, text=text_msg)
+        return {"status": "ok", "sent_to": chat_id, "alert_count": len(alerts)}
+    except Exception as exc:
+        logging.exception("alertmanager forward to feishu failed: %s", exc)
+        return {"status": "error", "reason": str(exc)}
 
-    return {"status": "ok", "sent_to": chat_id, "alert_count": len(alerts)}
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    logging.exception("unhandled exception: %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"status": "error", "message": str(exc)})

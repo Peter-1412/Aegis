@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import time
 from typing import Any
 
 import httpx
 from langchain_core.tools import tool
 
-from ..settings import settings
+from config.config import settings
 
 
 def _parse_dt(iso: str) -> datetime:
@@ -33,6 +34,7 @@ async def jaeger_query_traces(
     end_iso: str,
     limit: int = 10,
 ) -> dict:
+    t0 = time.monotonic()
     base_url = (settings.jaeger_base_url or "").rstrip("/")
     service_name = (service or "").strip()
     if not base_url:
@@ -112,22 +114,16 @@ async def jaeger_query_traces(
     for trace in data.get("data") or []:
         trace_id = trace.get("traceID")
         spans = trace.get("spans") or []
-        root_span = spans[0] if spans else {}
-        operation_name = root_span.get("operationName")
+        services = {span.get("process", {}).get("serviceName") for span in spans}
+        services = {s for s in services if s}
         duration_us = trace.get("duration")
-        tags = root_span.get("tags") or []
-        error_tags = [
-            t
-            for t in tags
-            if t.get("key") in ("error", "otel.status_code")
-            and str(t.get("value")).lower() in ("true", "error")
-        ]
         traces_summary.append(
             {
                 "trace_id": trace_id,
-                "operation": operation_name,
                 "duration_us": duration_us,
-                "has_error_tag": bool(error_tags),
+                "service_count": len(services),
+                "services": sorted(list(services)),
+                "span_count": len(spans),
             }
         )
     result = {
@@ -135,9 +131,9 @@ async def jaeger_query_traces(
         "start": start.isoformat(),
         "end": end.isoformat(),
         "limit": limit_valid,
-        "trace_count": len(traces_summary),
-        "traces": traces_summary,
-        "jaeger_api": {"path": "/api/traces"},
+        "trace_summaries": traces_summary,
     }
+    dt = time.monotonic() - t0
+    logging.info("jaeger_query_traces done, duration_s=%.3f, traces=%s", dt, len(traces_summary))
     _JAEGER_CACHE[cache_key] = result
     return result

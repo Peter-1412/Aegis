@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
 from langchain_core.tools import tool
 
-from ..settings import settings
+from config.config import settings
 
 
 def _parse_dt(iso: str) -> datetime:
@@ -89,6 +90,7 @@ async def prometheus_query_range(
     promql_stripped = (promql or query or "").strip()
     start_iso = (start_iso or start or "").strip()
     end_iso = (end_iso or end or "").strip()
+    t0 = time.monotonic()
     payload = _extract_json_payload(promql_stripped)
     if isinstance(payload, dict):
         promql_stripped = str(payload.get("query") or payload.get("promql") or promql_stripped).strip()
@@ -192,5 +194,11 @@ async def prometheus_query_range(
         "result_type": data.get("data", {}).get("resultType"),
         "series": series,
     }
+    dt = time.monotonic() - t0
+    logging.info(
+        "prometheus_query_range done, duration_s=%.3f, series=%s",
+        dt,
+        len(series),
+    )
     _PROM_CACHE[cache_key] = result
     return result

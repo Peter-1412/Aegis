@@ -58,11 +58,12 @@ Aegis/
 
 rca-service 内部关键模块：
 
-- app/main.py：FastAPI 入口、HTTP 接口、飞书/Alertmanager 集成
+- app/interface/api.py：FastAPI 入口、HTTP 接口、飞书/Alertmanager 集成
+- app/interface/feishu_ws_client.py：飞书长连接事件网关
 - app/agent/executor.py：LangChain AgentExecutor 与系统 Prompt
-- app/tools/：Prometheus/Loki/Jaeger/trace_note 等工具
-- app/models.py：RCA 请求 / 响应及根因候选数据结构
-- app/settings.py：配置（可通过环境变量/K8s ConfigMap 注入）
+- app/tools/：Prometheus/Loki/Jaeger 等只读工具
+- app/models/：RCA 请求 / 响应及根因候选数据结构
+- config/config.py：配置（通过环境变量/K8s ConfigMap/Secret 注入）
 
 ### 4. 接口概览
 
@@ -127,7 +128,7 @@ export PROMETHEUS_BASE_URL="http://localhost:9090"
 export JAEGER_BASE_URL="http://localhost:16686"
 export ARK_API_KEY="your-llm-api-key"
 
-uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+uvicorn app.interface.api:app --host 0.0.0.0 --port 8002 --reload
 ```
 
 使用任意 HTTP 客户端调用 `/api/rca/analyze` 即可本地体验 RCA 能力。

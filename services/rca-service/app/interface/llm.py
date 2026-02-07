@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from typing import Any, List, Optional
+import logging
+import time
 
 import ollama
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from .settings import settings
+from config.config import settings
 
 
 class OllamaChat(BaseChatModel):
@@ -74,7 +76,14 @@ class OllamaChat(BaseChatModel):
         stop: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> ChatResult:
+        t0 = time.monotonic()
         payload_messages = self._build_messages(messages)
+        logging.info(
+            "llm generate start, model=%s, msg_count=%s, streaming=%s",
+            self.model,
+            len(payload_messages),
+            self.streaming,
+        )
         options: dict[str, Any] = {
             "num_predict": settings.ollama_num_predict,
             "temperature": settings.ollama_temperature,
@@ -96,6 +105,13 @@ class OllamaChat(BaseChatModel):
         content = self._strip_think_block(content)
         content = self._apply_stop(content, stop)
         generation = ChatGeneration(message=AIMessage(content=content))
+        dt = time.monotonic() - t0
+        logging.info(
+            "llm generate done, model=%s, duration_s=%.3f, output_len=%s",
+            self.model,
+            dt,
+            len(content),
+        )
         return ChatResult(generations=[generation])
 
     async def _agenerate(
@@ -104,7 +120,14 @@ class OllamaChat(BaseChatModel):
         stop: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> ChatResult:
+        t0 = time.monotonic()
         payload_messages = self._build_messages(messages)
+        logging.info(
+            "llm agenerate start, model=%s, msg_count=%s, streaming=%s",
+            self.model,
+            len(payload_messages),
+            self.streaming,
+        )
         options: dict[str, Any] = {
             "num_predict": settings.ollama_num_predict,
             "temperature": settings.ollama_temperature,
@@ -126,10 +149,23 @@ class OllamaChat(BaseChatModel):
         content = self._strip_think_block(content)
         content = self._apply_stop(content, stop)
         generation = ChatGeneration(message=AIMessage(content=content))
+        dt = time.monotonic() - t0
+        logging.info(
+            "llm agenerate done, model=%s, duration_s=%.3f, output_len=%s",
+            self.model,
+            dt,
+            len(content),
+        )
         return ChatResult(generations=[generation])
 
 
 def get_llm(streaming: bool = False) -> BaseChatModel:
+    logging.info(
+        "llm init, model=%s, base_url=%s, streaming=%s",
+        settings.ollama_model,
+        settings.ollama_base_url,
+        streaming,
+    )
     return OllamaChat(
         model=settings.ollama_model,
         host=settings.ollama_base_url,

@@ -105,7 +105,7 @@ Agent 会自动：
 如果发现 Agent 返回结果异常或没有反应，可以按以下步骤排查：
 
 1. 检查飞书长连接网关进程是否正常：
-   - 使用 `lark-oapi` 建立长连接的进程是否在运行；
+   - 运行 `app/interface/feishu_ws_client.py` 的长连接进程是否在运行；
    - `app_id`、`app_secret`、订阅的 `im.message.receive_v1` 是否配置正确。
 2. 在 Kubernetes 中检查 rca-service 状态：
 

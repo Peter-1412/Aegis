@@ -28,15 +28,16 @@ Aegis RCA Agent 运行在 Kubernetes 集群中，通过只读方式消费可观�
 - 镜像构建：
   - `services/rca-service/Dockerfile`
 - 核心模块：
-  - `app/main.py`：HTTP 接口、流式输出、Feishu/Alertmanager 回调处理
+  - `app/interface/api.py`：HTTP 接口、流式输出、Feishu/Alertmanager 集成
+  - `app/interface/feishu_ws_client.py`：飞书长连接事件网关
   - `app/agent/executor.py`：Agent Prompt + 工具装配（只读工具）
   - `app/tools/`：
     - `prometheus_query_range`：Prometheus 范围查询
-    - `rca_collect_evidence`：从 Loki 批量抽取错误日志证据
+    - `loki_collect_evidence`：从 Loki 批量抽取错误日志证据
     - `jaeger_query_traces`：从 Jaeger 查询代表性调用链
-    - `trace_note`：记录 Agent 的计划与意图
-  - `app/models.py`：RCA 请求、根因候选、响应结构
-  - `app/settings.py`：配置项（通过环境变量/ConfigMap/Secret 注入）
+  - `app/memory/store.py`：会话短时记忆
+  - `app/models/`：RCA 请求、根因候选、响应结构
+  - `config/config.py`：配置项（通过环境变量/ConfigMap/Secret 注入）
 
 ### 2.2 只读访问保证
 
@@ -66,12 +67,12 @@ Aegis RCA Agent 运行在 Kubernetes 集群中，通过只读方式消费可观�
 
 1. 运维在告警群内 @ 机器人，并用自然语言描述问题。
 2. 基于 `lark-oapi` 的长连接事件网关从飞书接收 `im.message.receive_v1` 事件。
-3. 事件网关将消息内容转发给 rca-service（调用 `/api/rca/analyze` 或内部封装接口）。
-4. rca-service 以“最近 15 分钟”为时间窗口构造 `RCARequest` 并调用内部 `_run_rca`。
+3. 事件网关将消息内容转发给 rca-service（调用 `/feishu/receive`）。
+4. rca-service 以“最近 15 分钟”为时间窗口构造 `RCARequest` 并调用内部 RCA。
 5. LangChain Agent 基于 Prompt 和工具执行以下步骤：
-   - 调用 `trace_note` 记录当前分析计划。
+   - 规划分析步骤。
    - 调用 `prometheus_query_range` 检查关键服务的错误率、延迟、QPS 等指标。
-   - 调用 `rca_collect_evidence` 从 Loki 拉取错误日志样本。
+   - 调用 `loki_collect_evidence` 从 Loki 拉取错误日志样本。
    - 必要时调用 `jaeger_query_traces` 检查调用链中是否存在跨服务错误或明显延迟。
    - 整理出 1~3 个根因候选，并生成 `summary` 与 `next_actions`。
 6. rca-service 将结果整理成飞书文本消息发送回相同 `chat_id`。
@@ -118,4 +119,3 @@ Aegis RCA Agent 运行在 Kubernetes 集群中，通过只读方式消费可观�
 
 - `/alertmanager/webhook`（供 Alertmanager 调用，也可仅在集群内使用 ClusterIP）
 - `/api/rca/analyze` 与 `/api/rca/analyze/stream`（如需给其他系统或长连接网关调用）
-

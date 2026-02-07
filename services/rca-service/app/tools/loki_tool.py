@@ -1,13 +1,86 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
+import time
 from typing import Any
 
+import httpx
 from langchain_core.tools import tool
 
-from ..loki_client import LokiClient
-from ..settings import settings
+from config.config import settings
+
+
+def _dt_to_ns(dt: datetime) -> int:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1_000_000_000)
+
+
+@dataclass(frozen=True)
+class LokiQueryResult:
+    raw: dict
+
+    def flatten_log_lines(self, limit: int | None = None) -> list[str]:
+        data = self.raw.get("data", {})
+        results = data.get("result", []) or []
+        lines: list[str] = []
+        for item in results:
+            stream = item.get("stream", {}) or {}
+            values = item.get("values", []) or []
+            for ts, line in values:
+                labels = ",".join(f"{k}={v}" for k, v in sorted(stream.items()))
+                lines.append(f"{ts} [{labels}] {line}")
+        if limit is not None:
+            return lines[:limit]
+        return lines
+
+
+class LokiClient:
+    def __init__(self, base_url: str, tenant_id: str | None, timeout_s: float):
+        self._base_url = base_url.rstrip("/")
+        self._tenant_id = tenant_id
+        self._timeout_s = timeout_s
+
+    def _headers(self) -> dict[str, str]:
+        if self._tenant_id:
+            return {"X-Scope-OrgID": self._tenant_id}
+        return {}
+
+    async def label_values(self, label: str) -> list[str]:
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=self._timeout_s) as client:
+            r = await client.get(f"{self._base_url}/loki/api/v1/label/{label}/values", headers=self._headers())
+        r.raise_for_status()
+        values = (r.json().get("data") or [])[:]
+        dt = time.monotonic() - t0
+        logging.info("loki label_values done, label=%s, duration_s=%.3f, values=%s", label, dt, len(values))
+        return values
+
+    async def query_range(
+        self,
+        query: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 200,
+        direction: str = "BACKWARD",
+    ) -> LokiQueryResult:
+        t0 = time.monotonic()
+        params: dict[str, str | int] = {
+            "query": query,
+            "start": _dt_to_ns(start),
+            "end": _dt_to_ns(end),
+            "limit": limit,
+            "direction": direction,
+        }
+        async with httpx.AsyncClient(timeout=self._timeout_s) as client:
+            r = await client.get(f"{self._base_url}/loki/api/v1/query_range", params=params, headers=self._headers())
+        r.raise_for_status()
+        res = LokiQueryResult(raw=r.json())
+        dt = time.monotonic() - t0
+        logging.info("loki query_range done, duration_s=%.3f, limit=%s", dt, limit)
+        return res
 
 
 def _parse_dt(iso: str) -> datetime:
@@ -55,6 +128,7 @@ def make_loki_collect_evidence(loki: LokiClient):
         service_patterns: list[str] | None = None,
         text_patterns: list[str] | None = None,
     ) -> dict:
+        t0 = time.monotonic()
         try:
             start = _parse_dt(start_iso)
             end = _parse_dt(end_iso)
@@ -198,6 +272,13 @@ def make_loki_collect_evidence(loki: LokiClient):
             "evidence_lines": evidence_lines[:max_total_lines_valid],
             "loki_api": {"path": "/loki/api/v1/query_range"},
         }
+        dt = time.monotonic() - t0
+        logging.info(
+            "loki_collect_evidence done, duration_s=%.3f, services=%s, lines=%s",
+            dt,
+            len(services),
+            len(result["evidence_lines"]),
+        )
         _LOKI_CACHE[cache_key] = result
         return result
 
