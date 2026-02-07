@@ -110,12 +110,16 @@ def main() -> None:
     if not FEISHU_APP_ID or not FEISHU_APP_SECRET:
         raise RuntimeError("FEISHU_APP_ID / FEISHU_APP_SECRET 未配置")
     client = lark.Client.builder().app_id(FEISHU_APP_ID).app_secret(FEISHU_APP_SECRET).build()
-    handler = (
-        lark.EventDispatcherHandler.builder("", "")
-        .register_p2_im_message_receive_v1(_on_im_message)
-        .register("im.chat.access_event.bot_p2p_chat_entered_v1", _on_bot_p2p_chat_entered)
-        .build()
-    )
+    builder = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(_on_im_message)
+    if P2ImChatAccessEventBotP2pChatEnteredV1 is not None and hasattr(
+        builder, "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1"
+    ):
+        builder = builder.register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(_on_bot_p2p_chat_entered)
+    elif hasattr(builder, "register"):
+        builder = builder.register("im.chat.access_event.bot_p2p_chat_entered_v1", _on_bot_p2p_chat_entered)
+    else:
+        logger.warning("bot_p2p_chat_entered handler not registered due to sdk version")
+    handler = builder.build()
     ws = lark.ws.Client(
         client,
         lark.ws.WithLogLevel(logging.INFO),
