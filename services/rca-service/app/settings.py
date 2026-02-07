@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     max_total_evidence_lines: int = 200
 
     ollama_base_url: str = "http://192.169.223.108:11434"
-    ollama_model: str = "deepseek-r1:32b"
+    ollama_model: str = "qwen2.5:32b"
     ollama_disable_thinking: bool = True
     ollama_num_predict: int = 512
     ollama_temperature: float = 0.1

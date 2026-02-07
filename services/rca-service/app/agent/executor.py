@@ -70,5 +70,4 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
         return_intermediate_steps=True,
         max_iterations=settings.agent_max_iterations,
         max_execution_time=settings.agent_max_execution_time_s,
-        early_stopping_method="generate",
     )
