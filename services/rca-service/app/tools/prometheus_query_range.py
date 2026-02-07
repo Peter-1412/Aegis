@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import logging
 from typing import Any
 
@@ -25,16 +26,42 @@ _PROM_CACHE: dict[tuple[Any, ...], dict] = {}
     description="按时间范围执行 PromQL 查询，返回时间序列数据及原始结果概要，适用于 Todo_List 项目的服务健康与资源分析。",
 )
 async def prometheus_query_range(
-    promql: str,
-    start_iso: str,
-    end_iso: str,
+    promql: str | None = None,
+    start_iso: str | None = None,
+    end_iso: str | None = None,
     step: str = "60s",
+    query: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
 ) -> dict:
-    promql_stripped = (promql or "").strip()
+    promql_stripped = (promql or query or "").strip()
+    start_iso = (start_iso or start or "").strip()
+    end_iso = (end_iso or end or "").strip()
+    if promql_stripped.startswith("{") and promql_stripped.endswith("}"):
+        try:
+            payload = json.loads(promql_stripped)
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            promql_stripped = str(payload.get("query") or payload.get("promql") or promql_stripped).strip()
+            if not start_iso:
+                start_iso = str(payload.get("start") or payload.get("start_iso") or "").strip()
+            if not end_iso:
+                end_iso = str(payload.get("end") or payload.get("end_iso") or "").strip()
+            if payload.get("step"):
+                step = str(payload.get("step") or step)
     if not promql_stripped:
         return {
             "error": "invalid_promql",
             "message": "promql 不能为空",
+        }
+    if not start_iso or not end_iso:
+        return {
+            "error": "invalid_datetime",
+            "message": "start_iso 和 end_iso 不能为空",
+            "promql": promql_stripped,
+            "start_raw": start_iso or None,
+            "end_raw": end_iso or None,
         }
     try:
         start = _parse_dt(start_iso)
@@ -43,7 +70,7 @@ async def prometheus_query_range(
         return {
             "error": "invalid_datetime",
             "message": str(exc),
-            "promql": promql,
+            "promql": promql_stripped,
             "start_raw": start_iso,
             "end_raw": end_iso,
         }
