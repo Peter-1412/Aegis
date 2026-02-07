@@ -41,7 +41,7 @@ RCA_SYSTEM_PROMPT = (
     "Action: 工具名称（必须是可用工具之一）\n"
     "Action Input: {{\"key\": \"value\"}}（必须是合法的单行 JSON 字符串，不要使用 Markdown 代码块，不要换行）\n"
     "...（可重复 Thought/Action/Action Input 多次，但必须成对出现）\n"
-    "Final: 只输出一个 JSON 对象，禁止任何额外文本。\n"
+    "Final Answer: 只输出一个 JSON 对象，禁止任何额外文本。\n"
     "以下是可用工具名称和详细说明，请据此规划工具调用顺序。"
     "可用工具名称列表：{tool_names}。"
     "工具描述详情：{tools}。"
@@ -52,5 +52,5 @@ RCA_SYSTEM_PROMPT = (
     "Action Input: {{\"promql\": \"up\", \"start_iso\": \"...\", \"end_iso\": \"...\"}}\n"
     "Observation: ...\n"
     "Thought: 我已获取数据...\n"
-    "Final: {{\"summary\": \"...\", ...}}"
+    "Final Answer: {{\"summary\": \"...\", ...}}"
 )

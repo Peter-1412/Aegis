@@ -22,6 +22,10 @@ except Exception:
 class LoggingReActOutputParser(ReActSingleInputOutputParser):
     def parse(self, text: str) -> AgentAction | AgentFinish:
         try:
+            # Handle non-standard "Final:" instead of "Final Answer:" if model gets it wrong
+            if "Final Answer:" not in text and "Final:" in text:
+                text = text.replace("Final:", "Final Answer:")
+            
             return super().parse(text)
         except Exception:
             # Try to fix common JSON errors (e.g. double output) before giving up
