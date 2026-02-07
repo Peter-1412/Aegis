@@ -90,6 +90,14 @@ async def prometheus_query_range(
     promql_stripped = (promql or query or "").strip()
     start_iso = (start_iso or start or "").strip()
     end_iso = (end_iso or end or "").strip()
+    
+    # Default to last 15 minutes if not provided
+    now = datetime.now(timezone.utc)
+    if not start_iso:
+        start_iso = (now - timedelta(minutes=15)).isoformat()
+    if not end_iso:
+        end_iso = now.isoformat()
+        
     t0 = time.monotonic()
     payload = _extract_json_payload(promql_stripped)
     if isinstance(payload, dict):

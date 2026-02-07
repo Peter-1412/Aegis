@@ -30,8 +30,8 @@ _JAEGER_CACHE: dict[tuple[Any, ...], dict] = {}
 )
 async def jaeger_query_traces(
     service: str,
-    start_iso: str,
-    end_iso: str,
+    start_iso: str | None = None,
+    end_iso: str | None = None,
     limit: int = 10,
 ) -> dict:
     t0 = time.monotonic()
@@ -48,6 +48,14 @@ async def jaeger_query_traces(
             "error": "invalid_service",
             "message": "service 不能为空",
         }
+        
+    # Default to last 15 minutes if not provided
+    now = datetime.now(timezone.utc)
+    if not start_iso:
+        start_iso = (now - timedelta(minutes=15)).isoformat()
+    if not end_iso:
+        end_iso = now.isoformat()
+        
     try:
         start = _parse_dt(start_iso)
         end = _parse_dt(end_iso)

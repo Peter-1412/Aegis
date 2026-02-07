@@ -120,8 +120,8 @@ def make_loki_collect_evidence(loki: LokiClient):
         ),
     )
     async def loki_collect_evidence(
-        start_iso: str,
-        end_iso: str,
+        start_iso: str | None = None,
+        end_iso: str | None = None,
         max_services: int = 50,
         per_service_log_limit: int = 200,
         max_total_lines: int = 200,
@@ -129,6 +129,14 @@ def make_loki_collect_evidence(loki: LokiClient):
         text_patterns: list[str] | None = None,
     ) -> dict:
         t0 = time.monotonic()
+        
+        # Default to last 15 minutes if not provided
+        now = datetime.now(timezone.utc)
+        if not start_iso:
+            start_iso = (now - timedelta(minutes=15)).isoformat()
+        if not end_iso:
+            end_iso = now.isoformat()
+            
         try:
             start = _parse_dt(start_iso)
             end = _parse_dt(end_iso)

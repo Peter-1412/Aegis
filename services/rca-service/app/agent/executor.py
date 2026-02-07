@@ -30,7 +30,20 @@ class LoggingReActOutputParser(ReActSingleInputOutputParser):
             if "Observation:" in text:
                 text = text.split("Observation:")[0].strip()
             
-            return super().parse(text)
+            result = super().parse(text)
+            
+            # Clean up tool_input if it's a string containing Markdown JSON
+            if isinstance(result, AgentAction) and isinstance(result.tool_input, str):
+                cleaned_input = result.tool_input.strip()
+                if cleaned_input.startswith("```"):
+                    cleaned_input = cleaned_input.strip("`")
+                    if cleaned_input.startswith("json"):
+                        cleaned_input = cleaned_input[4:]
+                    cleaned_input = cleaned_input.strip()
+                    # Re-assign the cleaned input (AgentAction is a named tuple, need to replace)
+                    result = AgentAction(tool=result.tool, tool_input=cleaned_input, log=result.log)
+            
+            return result
         except Exception:
             # Try to fix common JSON errors (e.g. double output) before giving up
             if "}{" in text:
