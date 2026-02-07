@@ -56,7 +56,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
             ),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ("human", "{agent_scratchpad}"),
         ]
     )
     agent = _create_agent(llm, tools, prompt)
