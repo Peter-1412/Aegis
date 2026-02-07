@@ -123,10 +123,15 @@ def main() -> None:
     ws_args = []
     if hasattr(lark.ws, "WithLogLevel"):
         ws_args.append(lark.ws.WithLogLevel(logging.INFO))
-    ws_args.append(lark.ws.WithEventHandler(handler))
+    if hasattr(lark.ws, "WithEventHandler"):
+        ws_args.append(lark.ws.WithEventHandler(handler))
+    else:
+        logger.warning("WithEventHandler not available, fallback to positional handler")
+        ws_args.append(handler)
     if hasattr(lark.ws, "WithReconnectInterval"):
         ws_args.append(lark.ws.WithReconnectInterval(5))
     ws = lark.ws.Client(client, *ws_args)
+    logger.info("feishu ws client started")
     ws.start()
 
 
