@@ -8,6 +8,7 @@ from langchain.memory import ConversationBufferMemory
 from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.runnables import RunnablePassthrough
 from langchain.agents.format_scratchpad import format_log_to_str
+from langchain.tools.render import render_text_description
 
 from app.prompt.rca_prompts import RCA_SYSTEM_PROMPT
 from config.config import settings
@@ -42,7 +43,11 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
             ("human", "{input}"),
             ("assistant", "{agent_scratchpad}"),
         ]
+    ).partial(
+        tools=render_text_description(tools),
+        tool_names=", ".join([t.name for t in tools]),
     )
+
     # Manually construct agent to inject custom parser
     agent = (
         RunnablePassthrough.assign(
