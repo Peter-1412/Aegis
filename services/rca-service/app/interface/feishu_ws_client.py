@@ -127,18 +127,18 @@ def main() -> None:
     if hasattr(lark.ws, "WithEventHandler"):
         ws_args.append(lark.ws.WithEventHandler(handler))
     else:
-        logger.warning("WithEventHandler not available, fallback to positional handler")
-        ws_args.append(handler)
+        logger.warning("WithEventHandler not available, fallback to legacy args")
     if hasattr(lark.ws, "WithReconnectInterval"):
         ws_args.append(lark.ws.WithReconnectInterval(5))
 
     use_client = True
+    param_names: list[str] = []
     try:
         sig = inspect.signature(lark.ws.Client)
-        names = [p.name for p in sig.parameters.values()]
-        if "app_id" in names or "appId" in names:
+        param_names = [p.name for p in sig.parameters.values()]
+        if "app_id" in param_names or "appId" in param_names:
             use_client = False
-        elif "client" in names:
+        elif "client" in param_names:
             use_client = True
     except Exception:
         use_client = True
@@ -152,7 +152,14 @@ def main() -> None:
             logger.warning("ws client init with client failed: %s", exc)
     if ws is None:
         try:
-            ws = lark.ws.Client(FEISHU_APP_ID, FEISHU_APP_SECRET, *ws_args)
+            kwargs = {}
+            if "event_handler" in param_names:
+                kwargs["event_handler"] = handler
+            elif "handler" in param_names:
+                kwargs["handler"] = handler
+            if "log_level" in param_names and hasattr(lark.ws, "LogLevel"):
+                kwargs["log_level"] = lark.ws.LogLevel.INFO
+            ws = lark.ws.Client(FEISHU_APP_ID, FEISHU_APP_SECRET, **kwargs)
             logger.info("feishu ws client started with app_id/app_secret")
         except Exception as exc:
             logger.error("ws client init failed: %s", exc)
