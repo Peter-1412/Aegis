@@ -17,9 +17,8 @@ class Settings(BaseSettings):
     per_service_log_limit: int = 200
     max_total_evidence_lines: int = 200
 
-    llm_model: str = "ep-20260207075658-4d5bg"
-    ark_api_key: str | None = None
-    ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    ollama_base_url: str = "http://192.169.223.108:11434"
+    ollama_model: str = "deepseek-r1:32b"
 
     feishu_app_id: str | None = None
     feishu_app_secret: str | None = None
