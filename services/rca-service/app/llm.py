@@ -52,6 +52,22 @@ class OllamaChat(BaseChatModel):
             return (head + tail).strip()
         return text
 
+    def _apply_stop(self, text: str, stop: Optional[List[str]]) -> str:
+        if not stop:
+            return text
+        earliest: int | None = None
+        for token in stop:
+            if not token:
+                continue
+            idx = text.find(token)
+            if idx == -1:
+                continue
+            if earliest is None or idx < earliest:
+                earliest = idx
+        if earliest is None:
+            return text
+        return text[:earliest].rstrip()
+
     def _generate(
         self,
         messages: List[BaseMessage],
@@ -78,6 +94,7 @@ class OllamaChat(BaseChatModel):
         except Exception:
             content = ""
         content = self._strip_think_block(content)
+        content = self._apply_stop(content, stop)
         generation = ChatGeneration(message=AIMessage(content=content))
         return ChatResult(generations=[generation])
 
@@ -107,6 +124,7 @@ class OllamaChat(BaseChatModel):
         except Exception:
             content = ""
         content = self._strip_think_block(content)
+        content = self._apply_stop(content, stop)
         generation = ChatGeneration(message=AIMessage(content=content))
         return ChatResult(generations=[generation])
 
