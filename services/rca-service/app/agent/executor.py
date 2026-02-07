@@ -26,6 +26,10 @@ class LoggingReActOutputParser(ReActSingleInputOutputParser):
             if "Final Answer:" not in text and "Final:" in text:
                 text = text.replace("Final:", "Final Answer:")
             
+            # Truncate hallucinated observations to prevent "both final answer and action" error
+            if "Observation:" in text:
+                text = text.split("Observation:")[0].strip()
+            
             return super().parse(text)
         except Exception:
             # Try to fix common JSON errors (e.g. double output) before giving up
@@ -58,7 +62,7 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
             agent_scratchpad=lambda x: format_log_to_str(x["intermediate_steps"]),
         )
         | prompt
-        | llm
+        | llm.bind(stop=["\nObservation"])
         | LoggingReActOutputParser()
     )
     
