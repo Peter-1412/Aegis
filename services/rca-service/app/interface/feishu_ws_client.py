@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -130,8 +131,32 @@ def main() -> None:
         ws_args.append(handler)
     if hasattr(lark.ws, "WithReconnectInterval"):
         ws_args.append(lark.ws.WithReconnectInterval(5))
-    ws = lark.ws.Client(client, *ws_args)
-    logger.info("feishu ws client started")
+
+    use_client = True
+    try:
+        sig = inspect.signature(lark.ws.Client)
+        names = [p.name for p in sig.parameters.values()]
+        if "app_id" in names or "appId" in names:
+            use_client = False
+        elif "client" in names:
+            use_client = True
+    except Exception:
+        use_client = True
+
+    ws = None
+    if use_client:
+        try:
+            ws = lark.ws.Client(client, *ws_args)
+            logger.info("feishu ws client started with client object")
+        except Exception as exc:
+            logger.warning("ws client init with client failed: %s", exc)
+    if ws is None:
+        try:
+            ws = lark.ws.Client(FEISHU_APP_ID, FEISHU_APP_SECRET, *ws_args)
+            logger.info("feishu ws client started with app_id/app_secret")
+        except Exception as exc:
+            logger.error("ws client init failed: %s", exc)
+            raise
     ws.start()
 
 
