@@ -49,7 +49,10 @@ def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory |
                 "next_actions 为后续可执行操作的中文列表，面向 SRE/运维工程师。"
                 "语言必须简洁、专业、直接，避免长段落和重复叙述，不要出现客套话。"
                 "summary 控制在 2~3 句内；每个 ranked_root_causes[*].description 控制在 1~2 句内；"
-                "key_indicators 和 key_logs 使用短语或极简句子；next_actions 不超过 5 条，每条不超过 1 句，可直接以动词开头。",
+                "key_indicators 和 key_logs 使用短语或极简句子；next_actions 不超过 5 条，每条不超过 1 句，可直接以动词开头。"
+                "以下是可用工具名称和详细说明，请据此规划工具调用顺序。"
+                "可用工具名称列表：{tool_names}。"
+                "工具描述详情：{tools}。",
             ),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
