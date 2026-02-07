@@ -18,6 +18,58 @@ def _parse_dt(iso: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _extract_json_payload(text: str | None) -> dict | None:
+    if not text:
+        return None
+    raw = text.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        if len(parts) >= 3:
+            raw = parts[1]
+            if raw.lstrip().startswith("json"):
+                raw = raw.lstrip()[4:]
+            raw = raw.strip()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    in_str = False
+    escape = False
+    depth = 0
+    start_idx = None
+    for i, ch in enumerate(text):
+        if in_str:
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start_idx = i
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start_idx is not None:
+                candidate = text[start_idx : i + 1]
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    start_idx = None
+    return None
+
+
 _PROM_CACHE: dict[tuple[Any, ...], dict] = {}
 
 
@@ -37,19 +89,15 @@ async def prometheus_query_range(
     promql_stripped = (promql or query or "").strip()
     start_iso = (start_iso or start or "").strip()
     end_iso = (end_iso or end or "").strip()
-    if promql_stripped.startswith("{") and promql_stripped.endswith("}"):
-        try:
-            payload = json.loads(promql_stripped)
-        except Exception:
-            payload = {}
-        if isinstance(payload, dict):
-            promql_stripped = str(payload.get("query") or payload.get("promql") or promql_stripped).strip()
-            if not start_iso:
-                start_iso = str(payload.get("start") or payload.get("start_iso") or "").strip()
-            if not end_iso:
-                end_iso = str(payload.get("end") or payload.get("end_iso") or "").strip()
-            if payload.get("step"):
-                step = str(payload.get("step") or step)
+    payload = _extract_json_payload(promql_stripped)
+    if isinstance(payload, dict):
+        promql_stripped = str(payload.get("query") or payload.get("promql") or promql_stripped).strip()
+        if not start_iso:
+            start_iso = str(payload.get("start") or payload.get("start_iso") or "").strip()
+        if not end_iso:
+            end_iso = str(payload.get("end") or payload.get("end_iso") or "").strip()
+        if payload.get("step"):
+            step = str(payload.get("step") or step)
     if not promql_stripped:
         return {
             "error": "invalid_promql",
@@ -78,7 +126,7 @@ async def prometheus_query_range(
         return {
             "error": "invalid_range",
             "message": "end 必须大于 start",
-            "promql": promql,
+            "promql": promql_stripped,
             "start": start.isoformat(),
             "end": end.isoformat(),
         }
