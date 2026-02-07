@@ -9,6 +9,11 @@ import lark_oapi as lark
 from dotenv import load_dotenv
 from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 
+try:
+    from lark_oapi.api.im.v1 import P2ImChatAccessEventBotP2pChatEnteredV1
+except Exception:
+    P2ImChatAccessEventBotP2pChatEnteredV1 = None
+
 
 load_dotenv()
 
@@ -58,17 +63,27 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
         logging.exception("forward feishu message failed: %s", exc)
 
 
+def _on_bot_p2p_chat_entered(data: P2ImChatAccessEventBotP2pChatEnteredV1) -> None:
+    event = getattr(data, "event", None)
+    chat_id = getattr(event, "chat_id", None) if event else None
+    logging.info("ignore bot_p2p_chat_entered event, chat_id=%s", chat_id)
+
+
 def main() -> None:
     app_id = FEISHU_APP_ID
     app_secret = FEISHU_APP_SECRET
     if not app_id or not app_secret:
         logging.error("Feishu app_id 或 app_secret 未配置")
         return
-    handler = (
-        lark.EventDispatcherHandler.builder("", "")
-        .register_p2_im_message_receive_v1(_on_im_message)
-        .build()
-    )
+    handler_builder = lark.EventDispatcherHandler.builder("", "").register_p2_im_message_receive_v1(_on_im_message)
+    if (
+        P2ImChatAccessEventBotP2pChatEnteredV1 is not None
+        and hasattr(handler_builder, "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1")
+    ):
+        handler_builder = handler_builder.register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(
+            _on_bot_p2p_chat_entered
+        )
+    handler = handler_builder.build()
     cli = lark.ws.Client(
         app_id,
         app_secret,
