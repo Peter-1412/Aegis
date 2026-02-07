@@ -108,10 +108,11 @@ class OllamaChat(BaseChatModel):
         generation = ChatGeneration(message=AIMessage(content=content))
         dt = time.monotonic() - t0
         logging.info(
-            "llm generate done, model=%s, duration_s=%.3f, output_len=%s",
+            "llm generate done, model=%s, duration_s=%.3f, output_len=%s, content=%s",
             self.model,
             dt,
             len(content),
+            content[:500].replace("\n", "\\n") + ("..." if len(content) > 500 else ""),
         )
         return ChatResult(generations=[generation])
 
@@ -152,10 +153,11 @@ class OllamaChat(BaseChatModel):
         generation = ChatGeneration(message=AIMessage(content=content))
         dt = time.monotonic() - t0
         logging.info(
-            "llm agenerate done, model=%s, duration_s=%.3f, output_len=%s",
+            "llm agenerate done, model=%s, duration_s=%.3f, output_len=%s, content=%s",
             self.model,
             dt,
             len(content),
+            content[:500].replace("\n", "\\n") + ("..." if len(content) > 500 else ""),
         )
         return ChatResult(generations=[generation])
 
