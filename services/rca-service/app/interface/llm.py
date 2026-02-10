@@ -24,13 +24,6 @@ class OllamaChat(BaseChatModel):
 
     def _build_messages(self, messages: List[BaseMessage]) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
-        if self.disable_thinking:
-            items.append(
-                {
-                    "role": "system",
-                    "content": "不要输出思考过程或<think>标签，只给出最终答案，尽量简短直接。",
-                }
-            )
         for m in messages:
             role = getattr(m, "type", "") or getattr(m, "role", "")
             content = str(getattr(m, "content", "") or "")

@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5:32b"
     ollama_disable_thinking: bool = True
     ollama_num_predict: int = 8192
-    ollama_temperature: float = 0.1
-    ollama_top_p: float = 0.9
+    ollama_temperature: float = 0.01
+    ollama_top_p: float = 0.95
 
     agent_max_iterations: int = 50
     agent_max_execution_time_s: float = 600.0
