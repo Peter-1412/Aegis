@@ -194,6 +194,7 @@ async def prometheus_query_range(
         for ts, val in item.get("values") or []:
             values.append([ts, val])
         series.append({"metric": metric, "values": values})
+    
     result = {
         "promql": promql_stripped,
         "start": start.isoformat(),
@@ -202,6 +203,25 @@ async def prometheus_query_range(
         "result_type": data.get("data", {}).get("resultType"),
         "series": series,
     }
+    
+    analysis = {}
+    if "up" in promql_stripped.lower():
+        jobs = {}
+        for s in series:
+            job = s.get("metric", {}).get("job", "unknown")
+            if job not in jobs:
+                jobs[job] = 0
+            jobs[job] += 1
+        analysis["job_distribution"] = jobs
+        analysis["total_series"] = len(series)
+        
+        if "node-exporter" in jobs:
+            analysis["node_exporter_count"] = jobs["node-exporter"]
+            analysis["hint"] = f"查询到 {jobs['node-exporter']} 个 node-exporter 序列，建议用其他方法（如 kube_node_info 或 kubelet）交叉验证节点总数"
+    
+    if analysis:
+        result["analysis"] = analysis
+    
     dt = time.monotonic() - t0
     logging.info(
         "prometheus_query_range done, duration_s=%.3f, series=%s",
