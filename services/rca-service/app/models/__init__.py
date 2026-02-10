@@ -1,8 +1,8 @@
 from .models import (
     AgentTrace,
-    RCAOutput,
-    RCARequest,
-    RCAResponse,
+    OpsOutput,
+    OpsRequest,
+    OpsResponse,
     RootCauseCandidate,
     TimeRange,
     TraceStep,

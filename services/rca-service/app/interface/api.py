@@ -14,10 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel
-
-from app.agent.rca_agent import RcaAgent, ensure_cst
+ 
+from app.agent.ops_agent import OpsAgent, ensure_cst
 from app.interface.feishu_client import feishu_client
-from app.models import RCARequest, RCAResponse, TimeRange
+from app.models import OpsRequest, OpsResponse, TimeRange
 from config.config import settings
 
 
@@ -84,14 +84,14 @@ if not _has_handler:
 logging.getLogger("uvicorn.access").addFilter(_HealthzAccessFilter())
 
 
-app = FastAPI(title="RCA Service", version="0.1.0")
+app = FastAPI(title="Ops Service", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-rca_agent = RcaAgent()
+ops_agent = OpsAgent()
 
 
 @app.middleware("http")
@@ -143,28 +143,28 @@ async def _handle_feishu_text(chat_id: str, text: str):
     text = _sanitize_feishu_text(raw_text)
     now = datetime.now(timezone(timedelta(hours=8)))
     logging.info("feishu request received, chat_id=%s, text=%s", chat_id, text)
-    ack_text = "收到，我来帮您查询，预计需要 1~3 分钟，我会在分析完成后把结果发给您。"
+    ack_text = "收到，我来帮您查询，预计需要 1~3 分钟，我会在之后把结果发给您。"
     try:
         logging.info("sending feishu ack, chat_id=%s, length=%s", chat_id, len(ack_text))
         await feishu_client.send_text_message(chat_id=chat_id, text=ack_text)
     except Exception as exc:
         logging.exception("send feishu ack failed: %s", exc)
-    req = RCARequest(
+    req = OpsRequest(
         description=text,
         time_range=TimeRange(start=now - timedelta(minutes=15), end=now),
         session_id=chat_id,
     )
     logging.info(
-        "start rca for chat_id=%s, window=%s~%s",
+        "start ops for chat_id=%s, window=%s~%s",
         chat_id,
         (now - timedelta(minutes=15)).isoformat(),
         now.isoformat(),
     )
     t0 = time.monotonic()
     try:
-        res = await rca_agent.analyze(req)
+        res = await ops_agent.analyze(req)
     except Exception as exc:
-        logging.exception("rca failed for feishu, chat_id=%s, error=%s", chat_id, exc)
+        logging.exception("ops failed for feishu, chat_id=%s, error=%s", chat_id, exc)
         error_text = "抱歉，分析过程中出现错误，请稍后重试或联系平台同学查看日志。"
         try:
             await feishu_client.send_text_message(chat_id=chat_id, text=error_text)
@@ -173,13 +173,13 @@ async def _handle_feishu_text(chat_id: str, text: str):
         raise
     dt = time.monotonic() - t0
     logging.info(
-        "rca finished, chat_id=%s, duration_s=%.3f, summary_len=%s",
+        "ops finished, chat_id=%s, duration_s=%.3f, summary_len=%s",
         chat_id,
         dt,
         len(res.summary or ""),
     )
     lines: list[str] = []
-    lines.append("【RCA结果】")
+    lines.append("【分析结果】")
     lines.append(f"问题：{text}")
     lines.append(f"结论：{res.summary}")
     if res.ranked_root_causes:
@@ -217,7 +217,7 @@ class AlertmanagerWebhook(BaseModel):
     alerts: list[Alert] = []
 
 
-class RCAStreamHandler(AsyncCallbackHandler):
+class OpsStreamHandler(AsyncCallbackHandler):
     def __init__(self, queue: asyncio.Queue):
         self.queue = queue
         self.session_id = str(uuid.uuid4())
@@ -358,14 +358,14 @@ class RCAStreamHandler(AsyncCallbackHandler):
         )
 
 
-@app.post("/api/rca/analyze", response_model=RCAResponse)
-async def analyze(req: RCARequest) -> RCAResponse:
+@app.post("/api/ops/analyze", response_model=OpsResponse)
+async def analyze(req: OpsRequest) -> OpsResponse:
     try:
         t0 = time.monotonic()
-        res = await rca_agent.analyze(req)
+        res = await ops_agent.analyze(req)
         dt = time.monotonic() - t0
         logging.info(
-            "rca analyze api done, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s",
+            "ops analyze api done, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s",
             dt,
             len(res.summary or ""),
             len(res.ranked_root_causes or []),
@@ -376,21 +376,21 @@ async def analyze(req: RCARequest) -> RCAResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/api/rca/analyze/stream")
-async def analyze_stream(req: RCARequest):
+@app.post("/api/ops/analyze/stream")
+async def analyze_stream(req: OpsRequest):
     queue: asyncio.Queue = asyncio.Queue()
     req_id = _request_id_var.get() or str(uuid.uuid4())
 
     async def runner():
         try:
             token = _request_id_var.set(req_id)
-            handler = RCAStreamHandler(queue)
+            handler = OpsStreamHandler(queue)
             start = ensure_cst(req.time_range.start)
             end = ensure_cst(req.time_range.end)
             logging.info(
-                "rca stream start, start=%s, end=%s, session_id=%s",
+                "ops stream start, start=%s, end=%s, session_id=%s",
                 start.isoformat(),
-                end.isoformat(),
+                end.isoformatting(),
                 handler.session_id,
             )
             await queue.put(
@@ -402,7 +402,7 @@ async def analyze_stream(req: RCARequest):
                 }
             )
             t0 = time.monotonic()
-            res = await rca_agent.analyze(req, callbacks=[handler])
+            res = await ops_agent.analyze(req, callbacks=[handler])
             dt = time.monotonic() - t0
             meta = {
                 "event": "final",
@@ -413,7 +413,7 @@ async def analyze_stream(req: RCARequest):
                 "request_id": req_id,
             }
             logging.info(
-                "rca stream final, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s",
+                "ops stream final, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s",
                 dt,
                 len(res.summary or ""),
                 len(res.ranked_root_causes or []),
@@ -421,10 +421,10 @@ async def analyze_stream(req: RCARequest):
             )
             await queue.put(meta)
         except Exception as exc:
-            logging.exception("rca stream error: %s", exc)
+            logging.exception("ops stream error: %s", exc)
             await queue.put({"event": "error", "message": str(exc), "request_id": req_id})
         finally:
-            logging.info("rca stream end")
+            logging.info("ops stream end")
             try:
                 _request_id_var.reset(token)
             except Exception:

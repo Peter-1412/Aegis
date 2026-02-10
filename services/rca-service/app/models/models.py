@@ -22,7 +22,7 @@ class TimeRange(BaseModel):
     end: datetime
 
 
-class RCARequest(BaseModel):
+class OpsRequest(BaseModel):
     description: str = Field(min_length=1, max_length=4000)
     time_range: TimeRange
     session_id: str | None = Field(default=None, max_length=200)
@@ -37,13 +37,13 @@ class RootCauseCandidate(BaseModel):
     key_logs: list[str] = []
 
 
-class RCAOutput(BaseModel):
+class OpsOutput(BaseModel):
     summary: str
     ranked_root_causes: list[RootCauseCandidate] = []
     next_actions: list[str] = []
 
 
-class RCAResponse(BaseModel):
+class OpsResponse(BaseModel):
     summary: str
     ranked_root_causes: list[RootCauseCandidate] = []
     next_actions: list[str] = []

@@ -8,7 +8,7 @@ from app.agent.executor import build_executor
 from app.interface.llm import get_llm
 from app.tools.loki_tool import LokiClient
 from app.memory.store import get_memory
-from app.models import AgentTrace, RCAOutput, RCARequest, RCAResponse, TraceStep
+from app.models import AgentTrace, OpsOutput, OpsRequest, OpsResponse, TraceStep
 from app.tools import build_tools
 from config.config import settings
 
@@ -61,13 +61,13 @@ def _build_trace(intermediate_steps) -> AgentTrace:
     return AgentTrace(steps=steps)
 
 
-class RcaAgent:
+class OpsAgent:
     def __init__(self):
         self._loki = LokiClient(settings.loki_base_url, settings.loki_tenant_id, settings.request_timeout_s)
 
-    async def analyze(self, req: RCARequest, callbacks: list | None = None) -> RCAResponse:
+    async def analyze(self, req: OpsRequest, callbacks: list | None = None) -> OpsResponse:
         logging.info(
-            "rca analyze start, description_len=%s, session_id=%s, start_raw=%s, end_raw=%s",
+            "ops analyze start, description_len=%s, session_id=%s, start_raw=%s, end_raw=%s",
             len(req.description or ""),
             req.session_id,
             getattr(req.time_range, "start", None),
@@ -91,24 +91,24 @@ class RcaAgent:
         try:
             res = await executor.ainvoke({"input": agent_input}, config=config)
         except Exception as exc:
-            logging.exception("rca executor failed: %s", exc)
+            logging.exception("ops executor failed: %s", exc)
             raise
         t1 = datetime.now(timezone.utc)
         raw = str(res.get("output") or "")
         try:
-            out = RCAOutput.model_validate_json(raw)
+            out = OpsOutput.model_validate_json(raw)
         except Exception:
-            logging.warning("rca output parse failed, output_len=%s", len(raw))
-            out = RCAOutput(summary=raw.strip() or "模型输出为空。", ranked_root_causes=[], next_actions=[])
+            logging.warning("ops output parse failed, output_len=%s", len(raw))
+            out = OpsOutput(summary=raw.strip() or "模型输出为空。", ranked_root_causes=[], next_actions=[])
         trace = _build_trace(res.get("intermediate_steps"))
-        resp = RCAResponse(
+        resp = OpsResponse(
             summary=out.summary,
             ranked_root_causes=out.ranked_root_causes or [],
             next_actions=out.next_actions or [],
             trace=trace,
         )
         logging.info(
-            "rca analyze end, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s, trace_steps=%s",
+            "ops analyze end, duration_s=%.3f, summary_len=%s, root_causes=%s, next_actions=%s, trace_steps=%s",
             (t1 - t0).total_seconds(),
             len(resp.summary or ""),
             len(resp.ranked_root_causes or []),

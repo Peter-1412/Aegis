@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain.agents.format_scratchpad import format_log_to_str
 from langchain.tools.render import render_text_description
 
-from app.prompt.rca_prompts import RCA_SYSTEM_PROMPT
+from app.prompt.ops_prompts import OPS_SYSTEM_PROMPT
 from config.config import settings
 
 try:
@@ -59,7 +59,7 @@ class LoggingReActOutputParser(ReActSingleInputOutputParser):
 def build_executor(llm: BaseChatModel, tools, memory: ConversationBufferMemory | None) -> AgentExecutor:
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", RCA_SYSTEM_PROMPT),
+            ("system", OPS_SYSTEM_PROMPT),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
             ("assistant", "{agent_scratchpad}"),
