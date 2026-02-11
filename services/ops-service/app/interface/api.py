@@ -158,12 +158,14 @@ async def _handle_feishu_text(chat_id: str, text: str):
     model_choice, question = _extract_model_choice(text)
     if not question:
         question = text
+    use_ensemble = model_choice is None
     now = datetime.now(timezone(timedelta(hours=8)))
     logging.info(
-        "feishu request received, chat_id=%s, text=%s, model=%s",
+        "feishu request received, chat_id=%s, text=%s, model=%s, ensemble=%s",
         chat_id,
         question,
         model_choice or settings.default_model,
+        use_ensemble,
     )
     ack_text = "收到，我来帮您查询，预计需要 1~3 分钟，我会在之后把结果发给您。"
     try:
@@ -185,7 +187,10 @@ async def _handle_feishu_text(chat_id: str, text: str):
     )
     t0 = time.monotonic()
     try:
-        res = await ops_agent.analyze(req)
+        if use_ensemble:
+            res = await ops_agent.analyze_ensemble(req, ["qwen", "glm", "deepseek", "doubao"])
+        else:
+            res = await ops_agent.analyze(req)
     except Exception as exc:
         logging.exception("ops failed for feishu, chat_id=%s, error=%s", chat_id, exc)
         error_text = "抱歉，分析过程中出现错误，请稍后重试或联系平台同学查看日志。"
@@ -215,6 +220,11 @@ async def _handle_feishu_text(chat_id: str, text: str):
         lines.append("后续建议：")
         for idx, act in enumerate(res.next_actions, start=1):
             lines.append(f"{idx}. {act}")
+    if res.ensemble_scores:
+        model_name = res.model or "unknown"
+        score = res.ensemble_scores.get(model_name, 0.0)
+        lines.append("")
+        lines.append(f"(本次结果由 {model_name} 为主，一致度 {score:.2f})")
     text_msg = "\n".join(lines)
     logging.info("sending feishu message, chat_id=%s, length=%s", chat_id, len(text_msg))
     await feishu_client.send_text_message(chat_id=chat_id, text=text_msg)

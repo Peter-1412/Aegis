@@ -49,3 +49,5 @@ class OpsResponse(BaseModel):
     ranked_root_causes: list[RootCauseCandidate] = []
     next_actions: list[str] = []
     trace: AgentTrace | None = None
+    model: str | None = None
+    ensemble_scores: dict[str, float] | None = None
