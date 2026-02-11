@@ -213,7 +213,7 @@ class DoubaoChat(BaseChatModel):
 
     def _build_extra_body(self) -> dict[str, Any]:
         if self.thinking_enabled:
-            return {"thinking": {"type": "enabled", "effort": self.thinking_effort}}
+            return {"thinking": {"type": "enabled"}}
         return {"thinking": {"type": "disabled"}}
 
     def _extract_content(self, response: Any) -> str:
