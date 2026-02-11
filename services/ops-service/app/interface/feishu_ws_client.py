@@ -4,7 +4,7 @@ import inspect
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import httpx
 import lark_oapi as lark
@@ -55,6 +55,21 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
         return
     message = event.message
     msg_id = getattr(message, "message_id", None)
+    create_time_raw = getattr(message, "create_time", None) or getattr(message, "createTime", None)
+    if create_time_raw is not None:
+        try:
+            ts_ms = int(str(create_time_raw))
+            msg_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+            age = datetime.now(timezone.utc) - msg_dt
+            if age > timedelta(minutes=5):
+                logger.info(
+                    "ignored old feishu message, msg_id=%s, age_s=%.1f",
+                    msg_id,
+                    age.total_seconds(),
+                )
+                return
+        except Exception:
+            logger.warning("failed to parse feishu message create_time, msg_id=%s, raw=%r", msg_id, create_time_raw)
     if msg_id:
         if msg_id in PROCESSED_MESSAGE_IDS:
             logger.info("duplicate feishu message ignored, message_id=%s", msg_id)
