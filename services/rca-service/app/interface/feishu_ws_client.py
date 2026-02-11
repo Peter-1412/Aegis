@@ -20,7 +20,7 @@ except Exception:
 load_dotenv()
 
 
-RCA_SERVICE_BASE_URL = os.getenv("RCA_SERVICE_BASE_URL", "http://localhost:8002")
+OPS_SERVICE_BASE_URL = os.getenv("OPS_SERVICE_BASE_URL", "http://localhost:8002")
 FEISHU_APP_ID = os.getenv("FEISHU_APP_ID") or ""
 FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET") or ""
 DEFAULT_CHAT_ID = os.getenv("FEISHU_DEFAULT_CHAT_ID") or ""
@@ -81,7 +81,7 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
     try:
         with httpx.Client(timeout=600.0) as client:
             r = client.post(url, json=payload)
-        logger.info("forwarded to rca-service, status=%s", r.status_code)
+        logger.info("forwarded to ops-service, status=%s", r.status_code)
         r.raise_for_status()
     except Exception as exc:
         logger.exception("forward feishu message failed: %s", exc)

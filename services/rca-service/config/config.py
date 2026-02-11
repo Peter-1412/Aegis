@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    service_name: str = "rca-service"
+    service_name: str = "ops-service"
 
     loki_base_url: str = "http://loki.monitoring.svc.cluster.local:3100"
     loki_tenant_id: str | None = None

@@ -39,7 +39,7 @@ class _JSONFormatter(logging.Formatter):
             "ts": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "service": "rca-service",
+            "service": "ops-service",
             "request_id": getattr(record, "request_id", None),
             "msg": record.getMessage(),
         }
@@ -390,7 +390,7 @@ async def analyze_stream(req: OpsRequest):
             logging.info(
                 "ops stream start, start=%s, end=%s, session_id=%s",
                 start.isoformat(),
-                end.isoformatting(),
+                end.isoformat(),
                 handler.session_id,
             )
             await queue.put(
