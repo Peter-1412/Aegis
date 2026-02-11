@@ -5,6 +5,8 @@ import json
 import logging
 import asyncio
 from difflib import SequenceMatcher
+import os
+import httpx
 
 from app.agent.executor import build_executor
 from app.interface.llm import get_llm
@@ -170,6 +172,27 @@ class OpsAgent:
             ",".join(model_names),
         )
 
+        async def _model_available(name: str) -> bool:
+            if name == "doubao":
+                key = settings.doubao_api_key or os.getenv("ARK_API_KEY")
+                return bool(key)
+            base = settings.ollama_base_url
+            if not base:
+                return False
+            url = f"{base.rstrip('/')}/api/tags"
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    r = await client.get(url)
+                return r.status_code < 500
+            except Exception:
+                return False
+
+        avail_checks = await asyncio.gather(*[asyncio.create_task(_model_available(m)) for m in model_names])
+        available_models = [m for m, ok in zip(model_names, avail_checks) if ok]
+        if not available_models:
+            logging.error("ops analyze ensemble: no available models, will fallback")
+            available_models = []
+
         async def _task(name: str):
             try:
                 resp = await self._run_with_model(req, name, callbacks=None, use_memory=False)
@@ -178,7 +201,8 @@ class OpsAgent:
                 logging.exception("ops analyze ensemble failed for model=%s: %s", name, exc)
                 return name, None, exc
 
-        tasks = [asyncio.create_task(_task(m)) for m in model_names]
+        target_models = available_models or model_names
+        tasks = [asyncio.create_task(_task(m)) for m in target_models]
         results = await asyncio.gather(*tasks)
 
         valid: list[tuple[str, OpsResponse]] = []
@@ -190,7 +214,18 @@ class OpsAgent:
                 errors.append((name, exc))
 
         if not valid:
-            raise RuntimeError("all ensemble models failed")
+            logging.error("ops analyze ensemble: all models failed for models=%s", ",".join(model_names))
+            fallback_model = req.model or settings.default_model
+            try:
+                logging.info("ops analyze ensemble fallback start, model=%s", fallback_model)
+                return await self._run_with_model(req, fallback_model, callbacks=None, use_memory=True)
+            except Exception as exc:
+                logging.exception(
+                    "ops analyze ensemble fallback failed, model=%s, error=%s",
+                    fallback_model,
+                    exc,
+                )
+                raise
 
         if len(valid) == 1:
             selected_name, selected_resp = valid[0]
