@@ -132,7 +132,8 @@ class OpsAgent:
             out = OpsOutput.model_validate_json(raw)
         except Exception:
             logging.warning("ops output parse failed, output_len=%s", len(raw))
-            out = OpsOutput(summary=raw.strip() or "模型输出为空。", ranked_root_causes=[], next_actions=[])
+            fallback_summary = raw.strip() or "模型未输出符合 JSON 格式的结果。"
+            out = OpsOutput(summary=fallback_summary, ranked_root_causes=[], next_actions=[])
         trace = _build_trace(res.get("intermediate_steps"))
         resp = OpsResponse(
             summary=out.summary,
@@ -241,7 +242,11 @@ class OpsAgent:
                     continue
                 total += _response_similarity(resp_i, resp_j)
                 count += 1
-            scores[name_i] = total / count if count else 0.0
+            base_score = total / count if count else 0.0
+            summary_text = (resp_i.summary or "").strip()
+            if not summary_text or summary_text in ("模型输出为空。", "模型输出为空") or len(summary_text) < 10:
+                base_score *= 0.1
+            scores[name_i] = base_score
 
         best_name = max(scores.items(), key=lambda x: x[1])[0]
         original_best = next(resp for name, resp in valid if name == best_name)
