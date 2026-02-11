@@ -36,8 +36,8 @@ OPS_SYSTEM_PROMPT = (
     "每个 ranked_root_causes[*].description 控制在 1~2 句内；"
     "key_indicators 和 key_logs 使用短语或或极简句子；next_actions 不超过 5 条，每条不超过 1 句，可直接以动词开头。"
     "JSON 结构示例："
-    '{"summary":"...","ranked_root_causes":[{"rank":1,"service":"svc","probability":0.8,'
-    '"description":"...","key_indicators":["..."],"key_logs":["..."]}],"next_actions":["..."]}'
+    '{{"summary":"...","ranked_root_causes":[{{"rank":1,"service":"svc","probability":0.8,'
+    '"description":"...","key_indicators":["..."],"key_logs":["..."]}}],"next_actions":["..."]}}'
     "实际输出时必须与该结构完全一致，仅允许替换字段内容，不能增加或删除字段，不能使用中文标点，不能在 JSON 外层再包裹任何文本。"
     "你必须严格按照以下格式输出。只有在需要调用工具时才输出 Thought/Action/Action Input；"
     "不要在输出中自行写 Observation，Observation 由系统回填。"
