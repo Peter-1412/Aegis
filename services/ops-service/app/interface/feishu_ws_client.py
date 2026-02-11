@@ -76,7 +76,7 @@ def _on_im_message(data: P2ImMessageReceiveV1) -> None:
         logger.info("received empty text, ignore, chat_id=%s", chat_id)
         return
     logger.info("received feishu message, chat_id=%s, text=%s", chat_id, text)
-    url = f"{RCA_SERVICE_BASE_URL}/feishu/receive"
+    url = f"{OPS_SERVICE_BASE_URL}/feishu/receive"
     payload = {"chat_id": chat_id, "text": text}
     try:
         with httpx.Client(timeout=600.0) as client:
@@ -104,7 +104,7 @@ def main() -> None:
         root.addHandler(handler)
     logger.info(
         "starting feishu ws client, base_url=%s, has_app_id=%s, has_app_secret=%s",
-        RCA_SERVICE_BASE_URL,
+        OPS_SERVICE_BASE_URL,
         bool(FEISHU_APP_ID),
         bool(FEISHU_APP_SECRET),
     )
