@@ -23,6 +23,9 @@ except Exception:
 
 class LoggingReActOutputParser(ReActSingleInputOutputParser):
     def parse(self, text: str) -> AgentAction | AgentFinish:
+        stripped = text.strip()
+        if not stripped:
+            return AgentFinish(return_values={"output": ""}, log=text)
         try:
             # Handle non-standard "Final:" instead of "Final Answer:" if model gets it wrong
             if "Final Answer:" not in text and "Final:" in text:
