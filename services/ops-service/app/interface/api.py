@@ -167,7 +167,7 @@ async def _handle_feishu_text(chat_id: str, text: str):
         model_choice or settings.default_model,
         use_ensemble,
     )
-    ack_text = "收到，我来帮您查询，预计需要 1~3 分钟，我会在之后把结果发给您。"
+    ack_text = "收到，我来帮您查询，预计需要 1~5 分钟，我会在之后把结果发给您。"
     try:
         logging.info("sending feishu ack, chat_id=%s, length=%s", chat_id, len(ack_text))
         await feishu_client.send_text_message(chat_id=chat_id, text=ack_text)
