@@ -131,6 +131,20 @@ def _sanitize_feishu_text(text: str) -> str:
     return " ".join(parts).strip()
 
 
+def _extract_model_choice(text: str) -> tuple[str | None, str]:
+    tokens = [t for t in text.split() if t]
+    if not tokens:
+        return None, ""
+    cleaned = [t for t in tokens if not t.startswith("@")]
+    if not cleaned:
+        cleaned = tokens
+    first = cleaned[0].strip().lower()
+    if first in {"qwen", "glm", "deepseek", "doubao"}:
+        remaining = " ".join(cleaned[1:]).strip()
+        return first, remaining
+    return None, " ".join(cleaned).strip()
+
+
 class FeishuIncoming(BaseModel):
     chat_id: str
     text: str
@@ -141,8 +155,16 @@ async def _handle_feishu_text(chat_id: str, text: str):
     if not raw_text:
         return
     text = _sanitize_feishu_text(raw_text)
+    model_choice, question = _extract_model_choice(text)
+    if not question:
+        question = text
     now = datetime.now(timezone(timedelta(hours=8)))
-    logging.info("feishu request received, chat_id=%s, text=%s", chat_id, text)
+    logging.info(
+        "feishu request received, chat_id=%s, text=%s, model=%s",
+        chat_id,
+        question,
+        model_choice or settings.default_model,
+    )
     ack_text = "收到，我来帮您查询，预计需要 1~3 分钟，我会在之后把结果发给您。"
     try:
         logging.info("sending feishu ack, chat_id=%s, length=%s", chat_id, len(ack_text))
@@ -150,9 +172,10 @@ async def _handle_feishu_text(chat_id: str, text: str):
     except Exception as exc:
         logging.exception("send feishu ack failed: %s", exc)
     req = OpsRequest(
-        description=text,
+        description=question,
         time_range=TimeRange(start=now - timedelta(minutes=15), end=now),
         session_id=chat_id,
+        model=model_choice or settings.default_model,
     )
     logging.info(
         "start ops for chat_id=%s, window=%s~%s",
@@ -180,7 +203,7 @@ async def _handle_feishu_text(chat_id: str, text: str):
     )
     lines: list[str] = []
     lines.append("【分析结果】")
-    lines.append(f"问题：{text}")
+    lines.append(f"问题：{question}")
     lines.append(f"结论：{res.summary}")
     if res.ranked_root_causes:
         lines.append("可能原因：")

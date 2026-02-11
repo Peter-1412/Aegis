@@ -77,7 +77,7 @@ class OpsAgent:
         end = ensure_cst(req.time_range.end)
         if end <= start:
             raise ValueError("end必须大于start。")
-        llm = get_llm(streaming=callbacks is not None, allow_thinking=True)
+        llm = get_llm(model_name=req.model, streaming=callbacks is not None, allow_thinking=True)
         tools = build_tools(self._loki)
         memory = get_memory(req.session_id)
         executor = build_executor(llm, tools, memory)

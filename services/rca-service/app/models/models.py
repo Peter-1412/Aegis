@@ -26,6 +26,7 @@ class OpsRequest(BaseModel):
     description: str = Field(min_length=1, max_length=4000)
     time_range: TimeRange
     session_id: str | None = Field(default=None, max_length=200)
+    model: str | None = Field(default=None, max_length=50)
 
 
 class RootCauseCandidate(BaseModel):
