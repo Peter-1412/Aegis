@@ -112,7 +112,7 @@ class OpsAgent:
             raise ValueError("end必须大于start。")
         llm = get_llm(model_name=model_name, streaming=callbacks is not None, allow_thinking=True)
         tools = build_tools(self._loki)
-        memory = get_memory(req.session_id) if use_memory else None
+        memory = get_memory(req.session_id)
         executor = build_executor(llm, tools, memory)
         agent_input = (
             f"故障描述：{req.description}\n"
