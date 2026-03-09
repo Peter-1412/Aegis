@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     doubao_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     doubao_api_key: str | None = None
     doubao_model: str = "ep-20260207075658-4d5bg"
-    doubao_temperature: float = 0.7
+    doubao_temperature: float = 0.0
     doubao_max_tokens: int = 4096
     doubao_thinking_enabled: bool = True
     doubao_thinking_effort: str = "high"

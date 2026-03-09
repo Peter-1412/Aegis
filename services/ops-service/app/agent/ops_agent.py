@@ -3,10 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 import logging
-import asyncio
-from difflib import SequenceMatcher
-import os
-import httpx
 
 from app.agent.executor import build_executor
 from app.interface.llm import get_llm
@@ -65,36 +61,6 @@ def _build_trace(intermediate_steps) -> AgentTrace:
     return AgentTrace(steps=steps)
 
 
-def _jaccard(a: set[str], b: set[str]) -> float:
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    if inter == 0:
-        return 0.0
-    return inter / float(len(a | b))
-
-
-def _response_similarity(a: OpsResponse, b: OpsResponse) -> float:
-    sa = (a.summary or "").strip()
-    sb = (b.summary or "").strip()
-    summary_sim = SequenceMatcher(None, sa, sb).ratio() if sa and sb else 0.0
-    ra = {
-        (c.service or "").strip().lower() + "|" + c.description.strip().lower()
-        for c in (a.ranked_root_causes or [])
-        if c.description
-    }
-    rb = {
-        (c.service or "").strip().lower() + "|" + c.description.strip().lower()
-        for c in (b.ranked_root_causes or [])
-        if c.description
-    }
-    rc_sim = _jaccard(ra, rb)
-    aa = {s.strip().lower() for s in (a.next_actions or []) if s}
-    ab = {s.strip().lower() for s in (b.next_actions or []) if s}
-    actions_sim = _jaccard(aa, ab)
-    return 0.6 * summary_sim + 0.25 * rc_sim + 0.15 * actions_sim
-
-
 class OpsAgent:
     def __init__(self):
         self._loki = LokiClient(settings.loki_base_url, settings.loki_tenant_id, settings.request_timeout_s)
@@ -104,7 +70,6 @@ class OpsAgent:
         req: OpsRequest,
         model_name: str,
         callbacks: list | None = None,
-        use_memory: bool = True,
     ) -> OpsResponse:
         start = ensure_cst(req.time_range.start)
         end = ensure_cst(req.time_range.end)
@@ -163,105 +128,4 @@ class OpsAgent:
             req.model or settings.default_model,
         )
         model_name = req.model or settings.default_model
-        return await self._run_with_model(req, model_name, callbacks=callbacks, use_memory=True)
-
-    async def analyze_ensemble(self, req: OpsRequest, model_names: list[str]) -> OpsResponse:
-        logging.info(
-            "ops analyze ensemble start, description_len=%s, session_id=%s, models=%s",
-            len(req.description or ""),
-            req.session_id,
-            ",".join(model_names),
-        )
-
-        async def _model_available(name: str) -> bool:
-            if name == "doubao":
-                key = settings.doubao_api_key or os.getenv("ARK_API_KEY")
-                return bool(key)
-            base = settings.ollama_base_url
-            if not base:
-                return False
-            url = f"{base.rstrip('/')}/api/tags"
-            try:
-                async with httpx.AsyncClient(timeout=3.0) as client:
-                    r = await client.get(url)
-                return r.status_code < 500
-            except Exception:
-                return False
-
-        avail_checks = await asyncio.gather(*[asyncio.create_task(_model_available(m)) for m in model_names])
-        available_models = [m for m, ok in zip(model_names, avail_checks) if ok]
-        if not available_models:
-            logging.error("ops analyze ensemble: no available models, will fallback")
-            available_models = []
-
-        async def _task(name: str):
-            try:
-                resp = await self._run_with_model(req, name, callbacks=None, use_memory=False)
-                return name, resp, None
-            except Exception as exc:
-                logging.exception("ops analyze ensemble failed for model=%s: %s", name, exc)
-                return name, None, exc
-
-        target_models = available_models or model_names
-        tasks = [asyncio.create_task(_task(m)) for m in target_models]
-        results = await asyncio.gather(*tasks)
-
-        valid: list[tuple[str, OpsResponse]] = []
-        errors: list[tuple[str, Exception]] = []
-        for name, resp, exc in results:
-            if resp is not None:
-                valid.append((name, resp))
-            elif exc is not None:
-                errors.append((name, exc))
-
-        if not valid:
-            logging.error("ops analyze ensemble: all models failed for models=%s", ",".join(model_names))
-            fallback_model = req.model or settings.default_model
-            try:
-                logging.info("ops analyze ensemble fallback start, model=%s", fallback_model)
-                return await self._run_with_model(req, fallback_model, callbacks=None, use_memory=True)
-            except Exception as exc:
-                logging.exception(
-                    "ops analyze ensemble fallback failed, model=%s, error=%s",
-                    fallback_model,
-                    exc,
-                )
-                raise
-
-        if len(valid) == 1:
-            selected_name, selected_resp = valid[0]
-            logging.info("ops analyze ensemble selected model=%s (only valid)", selected_name)
-            return selected_resp
-
-        scores: dict[str, float] = {}
-        for i, (name_i, resp_i) in enumerate(valid):
-            total = 0.0
-            count = 0
-            for j, (name_j, resp_j) in enumerate(valid):
-                if i == j:
-                    continue
-                total += _response_similarity(resp_i, resp_j)
-                count += 1
-            base_score = total / count if count else 0.0
-            summary_text = (resp_i.summary or "").strip()
-            if not summary_text or summary_text in ("模型输出为空。", "模型输出为空") or len(summary_text) < 10:
-                base_score *= 0.1
-            scores[name_i] = base_score
-
-        best_name = max(scores.items(), key=lambda x: x[1])[0]
-        original_best = next(resp for name, resp in valid if name == best_name)
-        best_resp = OpsResponse(
-            summary=original_best.summary,
-            ranked_root_causes=original_best.ranked_root_causes,
-            next_actions=original_best.next_actions,
-            trace=original_best.trace,
-            model=best_name,
-            ensemble_scores=scores,
-        )
-        logging.info(
-            "ops analyze ensemble selected model=%s, score=%.3f, models_scored=%s",
-            best_name,
-            scores.get(best_name, 0.0),
-            ",".join(f"{k}:{v:.3f}" for k, v in scores.items()),
-        )
-        return best_resp
+        return await self._run_with_model(req, model_name, callbacks=callbacks)
